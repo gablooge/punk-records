@@ -29,8 +29,8 @@ First release.
 
 ### Safety
 - Secret scanning (block, or store with `--redact`) before anything enters the store
-- Restore and append only write memory paths inside the project; a tampered store or bundle cannot
-  plant hooks or scripts
+- Restore and append only write memory paths inside the project (or `$HOME` for global memories);
+  a tampered store or bundle cannot plant hooks or scripts
 
 ### Platforms
 - Linux, macOS and Windows, Python 3.9 to 3.13 (CI tests 3.9 and 3.13), no dependencies besides git
