@@ -86,8 +86,8 @@ def call_tool(store: Store, name: str, args: dict) -> str:
     if name == "get_context":
         return store.context(Path(args.get("cwd") or os.getcwd())) or "(no memories for this directory)"
     if name == "append_memory":
-        store.append(args["satellite"], args["path"], args["text"])
-        return f"remembered in {args['satellite']}/{args['path']}"
+        written = store.append(args["satellite"], args["path"], args["text"])
+        return f"remembered in {args['satellite']}/{written}"
     if name == "sync":
         actions = store.sync()
         return "\n".join(map(str, actions)) or "already in sync"

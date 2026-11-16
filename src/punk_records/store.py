@@ -698,15 +698,24 @@ class Store:
                 parts.append(f"<!-- punk-records: {sid}/{rel} -->\n{self.read(sid, rel).rstrip()}\n")
         return "\n".join(parts)
 
-    def append(self, sid: str, rel: str, text: str) -> None:
-        """Add a note to a memory file in the store and propagate it locally."""
+    def append(self, sid: str, rel: str, text: str) -> str:
+        """Add a note to a memory file in the store and propagate it locally.
+
+        Symlinked memories are followed (AGENTS.md -> CLAUDE.md appends to CLAUDE.md): first a
+        local link on this machine, if it stays inside the project, then links recorded in the
+        store. Returns the path that was written.
+        """
         self.require()
         validate_id(sid)
         if sid not in self.satellites():
             raise PunkError(f"unknown satellite: {sid}")
         if not is_memory_path(rel, self._kind(sid), self.config()):
             raise PunkError(f"{rel} is not a memory path (e.g. CLAUDE.md, AGENTS.md, napkin.md)")
-        rel = self._follow_links(sid, rel)  # AGENTS.md -> CLAUDE.md: append to CLAUDE.md
+        local_root = self.load_state()["paths"].get(sid)
+        local = _local_link(Path(local_root), rel) if local_root else None
+        if local and local != OUTSIDE:
+            rel = local  # linked here but not saved yet
+        rel = self._follow_links(sid, rel)
         if not is_memory_path(rel, self._kind(sid), self.config()):
             raise PunkError(f"{rel} is not a memory path (e.g. CLAUDE.md, AGENTS.md, napkin.md)")
         if secrets.scan(text):
@@ -718,5 +727,6 @@ class Store:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(existing + text.rstrip() + "\n", "utf-8")
         self.commit(f"remember in {sid}/{rel}")
-        if sid in self.load_state()["paths"]:
+        if local_root:
             self.restore([sid])
+        return rel

@@ -152,8 +152,8 @@ def cmd_context(store: Store, a) -> int:
 def cmd_remember(store: Store, a) -> int:
     sid = a.satellite or store.satellite_for(Path.cwd()) or GLOBAL_ID
     text = " ".join(a.text) if a.text else sys.stdin.read()
-    store.append(sid, a.file, text)
-    print(f"remembered in {sid}/{a.file}")
+    written = store.append(sid, a.file, text)
+    print(f"remembered in {sid}/{written}")
     return 0
 
 

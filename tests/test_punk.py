@@ -440,10 +440,29 @@ class TestSymlinks(Base):
             "name": "append_memory", "arguments": {"satellite": sid, "path": "AGENTS.md", "text": "- via mcp"}}})
         self.assertFalse(r["result"]["isError"])
         self.assertIn("- via mcp", (p / "CLAUDE.md").read_text())
-        s._write_links(sid, {"AGENTS.md": "GEMINI.md", "GEMINI.md": "AGENTS.md"})
-        s.commit("loop")
-        with self.assertRaises(PunkError):
-            s.append(sid, "AGENTS.md", "x")
+        # this machine's link wins over a differing store record
+        s._write_links(sid, {"AGENTS.md": "GEMINI.md", "GEMINI.md": "AGENT.md", "AGENT.md": "GEMINI.md"})
+        s.commit("other machine")
+        self.assertEqual(s.append(sid, "AGENTS.md", "- local wins"), "CLAUDE.md")
+        with self.assertRaises(PunkError):  # a loop recorded in the store is refused
+            s.append(sid, "GEMINI.md", "x")
+
+    def test_append_follows_unsaved_local_link(self):
+        s = Store(self.tmp / "s")
+        s.init(track_global=False)
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("rules\n")
+        sid = s.track(p)
+        s.save()
+        os.symlink("CLAUDE.md", p / "AGENTS.md")  # made after the last save
+        self.assertEqual(s.append(sid, "AGENTS.md", "- lesson"), "CLAUDE.md")
+        self.assertFalse((s.records / sid / "AGENTS.md").exists())
+        self.assertEqual((p / "CLAUDE.md").read_text(), "rules\n- lesson\n")
+        self.assertEqual(s.restore(), [])
+        (self.tmp / "outside.md").write_text("elsewhere\n")
+        os.symlink(str(self.tmp / "outside.md"), p / "GEMINI.md")  # leaves the project: not followed
+        self.assertEqual(s.append(sid, "GEMINI.md", "- note"), "GEMINI.md")
+        self.assertEqual((self.tmp / "outside.md").read_text(), "elsewhere\n")
 
     def test_scan_cli_warns(self):
         p = self.project("app")
