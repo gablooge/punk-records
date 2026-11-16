@@ -27,7 +27,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 from . import secrets
-from .discover import is_memory_path, scan
+from .discover import followed_target, is_memory_path, scan
 
 GLOBAL_ID = "global"
 
@@ -391,8 +391,9 @@ class Store:
                 actions.append(Action("missing", sid, note=f"{root} not found on this machine"))
                 continue
             kind = self._kind(sid)
-            found, local_links, warnings = scan(root, kind, cfg)
-            actions.extend(Action("skipped", sid, rel, why) for rel, why in warnings)
+            scanned = scan(root, kind, cfg)
+            found, local_links = scanned.files, scanned.links
+            actions.extend(Action("skipped", sid, rel, why) for rel, why in scanned.warnings)
             synced = state["synced"].setdefault(sid, {})
             dest = self.records / sid
             for rel in found:
@@ -568,7 +569,8 @@ class Store:
                 rdata = (self.records / sid / rel).read_bytes()
                 rec = sha(rdata)
                 dst = root / rel
-                if dst.is_symlink():  # never write through a link
+                # never write through a link, except a global dotfile link (see followed_target)
+                if dst.is_symlink() and not (kind == "global" and followed_target(root, dst, cfg)):
                     st = synced.get(rel)
                     if st and rec == st["record"]:
                         continue  # store unchanged; the new local symlink waits for `punk save`
@@ -610,7 +612,7 @@ class Store:
                     synced[rel] = {"local": rec, "record": rec}
             for rel in sorted(set(synced) - set(recfiles) - set(stored_links)):
                 dst = root / rel
-                if dst.is_symlink():
+                if dst.is_symlink() and not (kind == "global" and followed_target(root, dst, cfg)):
                     continue  # became a symlink here; `punk save` records it
                 if not dst.is_file():
                     if not dry_run:
@@ -713,7 +715,7 @@ class Store:
             raise PunkError(f"{rel} is not a memory path (e.g. CLAUDE.md, AGENTS.md, napkin.md)")
         local_root = self.load_state()["paths"].get(sid)
         local = _local_link(Path(local_root), rel) if local_root else None
-        if local and local != OUTSIDE:
+        if local and local != OUTSIDE and is_memory_path(local, self._kind(sid), self.config()):
             rel = local  # linked here but not saved yet
         rel = self._follow_links(sid, rel)
         if not is_memory_path(rel, self._kind(sid), self.config()):

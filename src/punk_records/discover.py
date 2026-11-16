@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import stat
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 # File names that are memories wherever they appear inside a project.
 BASENAMES = {
@@ -60,6 +62,12 @@ FORBIDDEN_SEGMENTS = {".git", ".hg", ".svn", ".."}
 
 MAX_BYTES = 1_000_000
 
+# Global (dotfiles-style) symlinks are never followed into these directories.
+SENSITIVE_SEGMENTS = {".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".password-store",
+                      "gcloud", ".netrc", ".git-credentials"}
+# ...and only to files that look like memories: these suffixes, or the link's own file name.
+FOLLOW_SUFFIXES = {".md", ".mdc", ".markdown", ".txt"}
+
 
 def _globs(kind: str, config: dict) -> list[str]:
     base = GLOBAL_GLOBS if kind == "global" else PROJECT_GLOBS
@@ -101,50 +109,84 @@ def _static_prefix(pattern: str) -> str:
     return "/".join(parts)
 
 
-def _link_target(root: Path, full: Path, kind: str, config: dict) -> tuple[str | None, str]:
-    """Classify a symlink: (target relpath, "") if it may be recorded, else (None, reason).
+class Scan(NamedTuple):
+    files: list  # regular memory files, plus followed global links (relative POSIX paths)
+    links: dict  # {link relpath: target relpath}: symlinks between memory files, kept as links
+    warnings: list  # [(relpath, reason)]: symlinked memories that are neither recorded nor followed
+    followed: dict  # {link relpath: target relpath}: global dotfile links stored by content
 
-    Only links whose final target is a memory file inside the satellite root qualify. Links that
-    leave the project are never followed.
+
+def _followable(target: Path, trel: str, name: str) -> str:
+    """Why a global link to a non-memory file inside $HOME may NOT be followed ("" if it may)."""
+    parts = PurePosixPath(trel).parts
+    if any(p in FORBIDDEN_SEGMENTS or p in SENSITIVE_SEGMENTS for p in parts):
+        return f"symlink points into {trel}; not followed"
+    if target.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
+        return f"symlink points to {trel}, which is executable; not followed"
+    if target.suffix.lower() not in FOLLOW_SUFFIXES and target.name != name:
+        return f"symlink points to {trel}, which does not look like a memory file; not followed"
+    if not _is_text(target):
+        return f"symlink points to {trel}, which is binary or too large; skipped"
+    return ""
+
+
+def classify_link(root: Path, full: Path, kind: str, config: dict | None = None
+                  ) -> tuple[str | None, str | None, str]:
+    """Classify a symlink at a memory path: (mode, target relpath, reason).
+
+    mode "link": the target is a memory file in the same satellite; recorded as a link.
+    mode "follow": global satellite only; the target is a memory-like text file elsewhere in
+        $HOME (a dotfiles repo), stored and restored by content through the link.
+    mode None: not usable; `reason` says why. Links that leave the satellite are never followed.
     """
+    config = config or {}
     try:
         target = full.resolve(strict=True)
     except (OSError, RuntimeError):  # missing target, or a symlink loop (RuntimeError on 3.9)
-        return None, "broken symlink; skipped"
+        return None, None, "broken symlink; skipped"
     try:
-        trel = target.relative_to(root.resolve()).as_posix()
+        trel = target.relative_to(Path(root).resolve()).as_posix()
     except ValueError:
-        return None, "symlink points outside the satellite; not followed"
+        return None, None, "symlink points outside the satellite; not followed"
     if not target.is_file():
-        return None, "symlink does not point to a file; skipped"
-    if not is_memory_path(trel, kind, config):
-        return None, f"symlink points to {trel}, which is not a memory file; skipped"
-    if not _is_text(target):
-        return None, f"symlink points to {trel}, which is binary or too large; skipped"
-    return trel, ""
+        return None, None, "symlink does not point to a file; skipped"
+    if is_memory_path(trel, kind, config):
+        if not _is_text(target):
+            return None, None, f"symlink points to {trel}, which is binary or too large; skipped"
+        return "link", trel, ""
+    if kind != "global":
+        return None, None, f"symlink points to {trel}, which is not a memory file; skipped"
+    why = _followable(target, trel, full.name)
+    return (None, None, why) if why else ("follow", trel, "")
 
 
-def scan(root: Path, kind: str = "project", config: dict | None = None
-         ) -> tuple[list[str], dict[str, str], list[tuple[str, str]]]:
-    """Find memories under `root`.
+def followed_target(root: Path, full: Path, config: dict | None = None) -> str | None:
+    """The $HOME-relative target if `full` is a global dotfile link that may be written through."""
+    if not full.is_symlink():
+        return None
+    mode, trel, _ = classify_link(root, full, "global", config)
+    return trel if mode == "follow" else None
 
-    Returns (files, links, warnings): sorted relative POSIX paths of regular memory files,
-    {link relpath: target relpath} for symlinked memories that resolve to a memory file inside
-    `root`, and [(relpath, reason)] for symlinked memories that cannot be recorded.
-    """
+
+def scan(root: Path, kind: str = "project", config: dict | None = None) -> Scan:
+    """Find memories under `root`. See `Scan` for what each field holds."""
     config = config or {}
     root = Path(root)
     found: set[str] = set()
     links: dict[str, str] = {}
+    followed: dict[str, str] = {}
     warnings: set[tuple[str, str]] = set()
 
     def consider(full: Path) -> None:
         rel = full.relative_to(root).as_posix()
         if full.is_symlink():
             if is_memory_path(rel, kind, config):
-                target, why = _link_target(root, full, kind, config)
-                if target:
+                mode, target, why = classify_link(root, full, kind, config)
+                if mode == "link":
                     links[rel] = target
+                elif mode == "follow":
+                    found.add(rel)
+                    followed[rel] = target
                 else:
                     warnings.add((rel, why))
             return
@@ -171,9 +213,9 @@ def scan(root: Path, kind: str = "project", config: dict | None = None
                 roots.add(target)
         for r in sorted(roots):
             walk(r)
-    return sorted(found), dict(sorted(links.items())), sorted(warnings)
+    return Scan(sorted(found), dict(sorted(links.items())), sorted(warnings), dict(sorted(followed.items())))
 
 
 def discover(root: Path, kind: str = "project", config: dict | None = None) -> list[str]:
-    """Return sorted relative POSIX paths of regular (non-symlink) memory files under `root`."""
+    """Return sorted relative POSIX paths of memory files stored by content under `root`."""
     return scan(root, kind, config)[0]

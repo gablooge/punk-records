@@ -70,15 +70,16 @@ def cmd_scan(store: Store, a) -> int:
     root = Path(a.path).expanduser().resolve()
     kind = "global" if a.global_ else "project"
     cfg = store.config() if store.exists() else {}
-    files, links, warnings = scan(Path.home() if a.global_ else root, kind, cfg)
+    found = scan(Path.home() if a.global_ else root, kind, cfg)
     print(f"# {GLOBAL_ID if a.global_ else derive_id(root)}")
-    for f in files:
-        print(f"  {f}")
-    for rel, target in links.items():
+    for f in found.files:
+        via = found.followed.get(f)
+        print(f"  {f}" + (f"  (follows symlink to {via})" if via else ""))
+    for rel, target in found.links.items():
         print(f"  {rel} -> {target}  (symlink)")
-    if not files and not links:
+    if not found.files and not found.links:
         print("  (no memory files found)")
-    for rel, why in warnings:
+    for rel, why in found.warnings:
         print(f"punk: warning: {rel}: {why}", file=sys.stderr)
     return 0
 
