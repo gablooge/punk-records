@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest a new memory format, command or integration.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe what you are trying to do and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+      description: For a new agent or tool, include the file names and locations it uses for memories or rules.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Project constraints
+      description: Punk Records has zero runtime dependencies and works offline.
+      options:
+        - label: This can work with the Python standard library and git only, or as an optional extra.
+        - label: This does not need the network outside `punk sync`.

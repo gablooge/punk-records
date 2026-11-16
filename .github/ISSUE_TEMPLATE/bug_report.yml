@@ -1,0 +1,68 @@
+name: Bug report
+description: Something does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please remove private paths, project names and memory text from anything you paste.
+        Security problems go to [Report a vulnerability](https://github.com/gablooge/punk-records/security/advisories/new), not here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you ran, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. punk init
+        2. punk track ~/code/app
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Output of the failing command, plus `punk status` if it is a sync problem.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: punk version
+      description: Output of `punk --version`.
+      placeholder: punk 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python and git versions
+      placeholder: Python 3.12.4, git 2.47.0
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - save / restore / sync
+        - export / import (air-gapped)
+        - scan / discovery of memory files
+        - secret scanning
+        - MCP server
+        - other

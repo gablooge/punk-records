@@ -163,4 +163,8 @@ mcp               MCP server on stdio
 python -m unittest discover -s tests -v
 ```
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules (no runtime dependencies, Python 3.9 syntax,
+tests for every change). Report security problems privately as described in
+[SECURITY.md](SECURITY.md).
+
 MIT licensed.
