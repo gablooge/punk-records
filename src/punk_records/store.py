@@ -85,6 +85,11 @@ def _diff_lines(data: bytes | None) -> list[str]:
     return lines
 
 
+def _eol(data: bytes) -> str:
+    crlf = data.count(b"\r\n")
+    return "LF" if not crlf else "CRLF" if crlf == data.count(b"\n") else "mixed"
+
+
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -716,6 +721,11 @@ class Store:
                 a = (self.records / sid / r).read_bytes() if r in stored else None
                 b = (root / r).read_bytes() if r in local else None
                 if a == b:
+                    continue
+                if a is not None and b is not None and \
+                        a.replace(b"\r\n", b"\n") == b.replace(b"\r\n", b"\n"):
+                    out.append(Diff(sid, r, f"{sid}/{r}: only line endings differ "
+                                            f"(store {_eol(a)}, local {_eol(b)})\n"))
                     continue
                 text = "".join(difflib.unified_diff(
                     _diff_lines(a), _diff_lines(b),

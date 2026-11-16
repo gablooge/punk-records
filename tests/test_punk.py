@@ -592,6 +592,12 @@ class TestDiff(Base):
         [d] = s.diff()
         self.assertTrue(d.text.endswith("-two\n+two\n\\ No newline at end of file\n"), d.text)
 
+    def test_line_ending_only_change_is_named(self):
+        s, p, sid = self.setup_store()
+        (p / "CLAUDE.md").write_bytes(b"one\r\ntwo\r\n")
+        [d] = s.diff()
+        self.assertEqual(d.text, f"{sid}/CLAUDE.md: only line endings differ (store LF, local CRLF)\n")
+
     def test_files_on_one_side_only(self):
         s, p, sid = self.setup_store()
         (p / "AGENTS.md").write_text("new here\n")
