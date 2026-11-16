@@ -37,7 +37,7 @@ def cmd_init(store: Store, a) -> int:
         print("Cloned from remote. Track your projects with `punk track <dir>`, then `punk sync`.")
     else:
         print("Next: `punk track <project-dir>` and `punk save`. Add a private git remote with\n"
-              f"  punk git remote add origin <url>\nthen `punk sync`.")
+              "  punk git remote add origin <url>\nthen `punk sync`.")
     return 0
 
 
