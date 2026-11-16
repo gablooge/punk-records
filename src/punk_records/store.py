@@ -354,6 +354,16 @@ class Store:
             return {}
         return {k: v for k, v in links.items() if isinstance(k, str) and isinstance(v, str)}
 
+    def _follow_links(self, sid: str, rel: str) -> str:
+        """The memory file a recorded symlink chain ends at (`rel` itself if it is no link)."""
+        links, seen = self.links(sid), set()
+        while rel in links:
+            if rel in seen:
+                raise PunkError(f"symlink loop at {sid}/{rel}")
+            seen.add(rel)
+            rel = links[rel]
+        return rel
+
     def _write_links(self, sid: str, links: dict[str, str]) -> None:
         path = self._meta_path(sid)
         try:
@@ -664,7 +674,7 @@ class Store:
     def read(self, sid: str, rel: str) -> str:
         validate_id(sid)
         base = self.records / sid
-        target = _safe_target(base, rel)
+        target = _safe_target(base, self._follow_links(sid, rel))
         if not target.is_file():
             raise PunkError(f"no memory {sid}/{rel}")
         return target.read_text("utf-8", "replace")
@@ -694,6 +704,9 @@ class Store:
         validate_id(sid)
         if sid not in self.satellites():
             raise PunkError(f"unknown satellite: {sid}")
+        if not is_memory_path(rel, self._kind(sid), self.config()):
+            raise PunkError(f"{rel} is not a memory path (e.g. CLAUDE.md, AGENTS.md, napkin.md)")
+        rel = self._follow_links(sid, rel)  # AGENTS.md -> CLAUDE.md: append to CLAUDE.md
         if not is_memory_path(rel, self._kind(sid), self.config()):
             raise PunkError(f"{rel} is not a memory path (e.g. CLAUDE.md, AGENTS.md, napkin.md)")
         if secrets.scan(text):

@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from punk_records import cli, secrets  # noqa: E402
 from punk_records.discover import discover, is_memory_path, scan  # noqa: E402
 from punk_records.mcp import handle  # noqa: E402
-from punk_records.store import Store, normalize_remote  # noqa: E402
+from punk_records.store import PunkError, Store, normalize_remote  # noqa: E402
 
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
            "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
@@ -384,6 +384,66 @@ class TestSymlinks(Base):
         self.assertEqual(sorted(x.rel for x in acts if x.kind == "blocked"), sorted(evil))
         for rel in evil:
             self.assertFalse(os.path.lexists(p / rel), rel)
+
+    def test_links_never_created_through_symlinked_dirs(self):
+        s = Store(self.tmp / "s")
+        s.init(track_global=False)
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("x\n")
+        outside = self.tmp / "outside"
+        (outside / "rules").mkdir(parents=True)
+        (outside / "rules" / "real.mdc").write_text("elsewhere\n")
+        os.symlink(str(outside), p / ".cursor")
+        sid = s.track(p)
+        s.save()
+        s._write_links(sid, {".cursor/rules/x.mdc": "CLAUDE.md", "AGENTS.md": ".cursor/rules/real.mdc"})
+        s.commit("tampered")
+        acts = s.restore(force=True)
+        self.assertEqual(sorted(x.rel for x in acts if x.kind == "blocked"),
+                         [".cursor/rules/x.mdc", "AGENTS.md"])
+        self.assertFalse(os.path.lexists(outside / "rules" / "x.mdc"))
+        self.assertFalse(os.path.lexists(p / "AGENTS.md"))
+
+    def test_new_local_link_survives_prune(self):
+        s = Store(self.tmp / "s")
+        s.init(track_global=False)
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("same\n")
+        (p / "AGENTS.md").write_text("same\n")
+        sid = s.track(p)
+        s.save()
+        (p / "AGENTS.md").unlink()
+        os.symlink("CLAUDE.md", p / "AGENTS.md")  # not saved yet
+        (s.records / sid / "AGENTS.md").unlink()  # another machine deleted the file
+        s.commit("other machine")
+        s.restore(prune=True)
+        self.assertTrue((p / "AGENTS.md").is_symlink())
+        s.save()
+        self.assertEqual(s.links(sid), {"AGENTS.md": "CLAUDE.md"})
+
+    def test_append_and_read_follow_recorded_links(self):
+        s = Store(self.tmp / "s")
+        s.init(track_global=False)
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("rules\n")
+        os.symlink("CLAUDE.md", p / "AGENTS.md")
+        sid = s.track(p)
+        s.save()
+        s.append(sid, "AGENTS.md", "- lesson")
+        self.assertFalse((s.records / sid / "AGENTS.md").exists())
+        self.assertEqual((s.records / sid / "CLAUDE.md").read_text(), "rules\n- lesson\n")
+        self.assertEqual(s.read(sid, "AGENTS.md"), "rules\n- lesson\n")
+        self.assertEqual(s.restore(), [])
+        self.assertTrue((p / "AGENTS.md").is_symlink())
+        self.assertEqual((p / "CLAUDE.md").read_text(), "rules\n- lesson\n")
+        r = handle(s, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "name": "append_memory", "arguments": {"satellite": sid, "path": "AGENTS.md", "text": "- via mcp"}}})
+        self.assertFalse(r["result"]["isError"])
+        self.assertIn("- via mcp", (p / "CLAUDE.md").read_text())
+        s._write_links(sid, {"AGENTS.md": "GEMINI.md", "GEMINI.md": "AGENTS.md"})
+        s.commit("loop")
+        with self.assertRaises(PunkError):
+            s.append(sid, "AGENTS.md", "x")
 
     def test_scan_cli_warns(self):
         p = self.project("app")
