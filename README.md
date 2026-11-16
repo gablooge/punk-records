@@ -8,9 +8,14 @@
 from every project and machine in a single versioned store. Sync it over any git remote, or carry it
 across an air gap on a USB stick. Agents can read and write it live over MCP.
 
-> On Egghead, Dr. Vegapunk keeps one shared brain, the Punk Records. His satellites each go off
+> On [Egghead](https://onepiece.fandom.com/wiki/Egghead), Dr.
+> [Vegapunk](https://onepiece.fandom.com/wiki/Vegapunk) keeps one shared brain, the
+> [Punk Records](https://onepiece.fandom.com/wiki/Punk_Records). His satellites each go off
 > and learn things, and whatever they learn flows back into that shared brain. This project does the
 > same for your agents: each project and machine is a satellite, and `~/.punk-records` is the brain.
+>
+> <sub>The name is a nod to *One Piece* (the linked wiki pages contain spoilers). This is a fan-named
+> project, not affiliated with Eiichiro Oda, Shueisha or Toei Animation.</sub>
 
 ## Why
 
