@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .discover import discover
+from .discover import discover, scan
 from .store import GLOBAL_ID, PunkError, Store, derive_id
 
 
@@ -70,12 +70,16 @@ def cmd_scan(store: Store, a) -> int:
     root = Path(a.path).expanduser().resolve()
     kind = "global" if a.global_ else "project"
     cfg = store.config() if store.exists() else {}
-    files = discover(Path.home() if a.global_ else root, kind, cfg)
+    files, links, warnings = scan(Path.home() if a.global_ else root, kind, cfg)
     print(f"# {GLOBAL_ID if a.global_ else derive_id(root)}")
     for f in files:
         print(f"  {f}")
-    if not files:
+    for rel, target in links.items():
+        print(f"  {rel} -> {target}  (symlink)")
+    if not files and not links:
         print("  (no memory files found)")
+    for rel, why in warnings:
+        print(f"punk: warning: {rel}: {why}", file=sys.stderr)
     return 0
 
 

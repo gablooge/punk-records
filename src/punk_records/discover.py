@@ -101,17 +101,54 @@ def _static_prefix(pattern: str) -> str:
     return "/".join(parts)
 
 
-def discover(root: Path, kind: str = "project", config: dict | None = None) -> list[str]:
-    """Return sorted relative POSIX paths of memory files under `root`."""
+def _link_target(root: Path, full: Path, kind: str, config: dict) -> tuple[str | None, str]:
+    """Classify a symlink: (target relpath, "") if it may be recorded, else (None, reason).
+
+    Only links whose final target is a memory file inside the satellite root qualify. Links that
+    leave the project are never followed.
+    """
+    try:
+        target = full.resolve(strict=True)
+    except (OSError, RuntimeError):  # missing target, or a symlink loop (RuntimeError on 3.9)
+        return None, "broken symlink; skipped"
+    try:
+        trel = target.relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None, "symlink points outside the satellite; not followed"
+    if not target.is_file():
+        return None, "symlink does not point to a file; skipped"
+    if not is_memory_path(trel, kind, config):
+        return None, f"symlink points to {trel}, which is not a memory file; skipped"
+    if not _is_text(target):
+        return None, f"symlink points to {trel}, which is binary or too large; skipped"
+    return trel, ""
+
+
+def scan(root: Path, kind: str = "project", config: dict | None = None
+         ) -> tuple[list[str], dict[str, str], list[tuple[str, str]]]:
+    """Find memories under `root`.
+
+    Returns (files, links, warnings): sorted relative POSIX paths of regular memory files,
+    {link relpath: target relpath} for symlinked memories that resolve to a memory file inside
+    `root`, and [(relpath, reason)] for symlinked memories that cannot be recorded.
+    """
     config = config or {}
     root = Path(root)
     found: set[str] = set()
+    links: dict[str, str] = {}
+    warnings: set[tuple[str, str]] = set()
 
     def consider(full: Path) -> None:
-        if full.is_symlink() or not full.is_file():
-            return
         rel = full.relative_to(root).as_posix()
-        if is_memory_path(rel, kind, config) and _is_text(full):
+        if full.is_symlink():
+            if is_memory_path(rel, kind, config):
+                target, why = _link_target(root, full, kind, config)
+                if target:
+                    links[rel] = target
+                else:
+                    warnings.add((rel, why))
+            return
+        if full.is_file() and is_memory_path(rel, kind, config) and _is_text(full):
             found.add(rel)
 
     def walk(start: Path) -> None:
@@ -128,9 +165,15 @@ def discover(root: Path, kind: str = "project", config: dict | None = None) -> l
             prefix = _static_prefix(pat)
             target = root / prefix if prefix else root
             if prefix == pat:
-                consider(target)
+                if os.path.lexists(target):
+                    consider(target)
             elif target.is_dir() and target != root:
                 roots.add(target)
         for r in sorted(roots):
             walk(r)
-    return sorted(found)
+    return sorted(found), dict(sorted(links.items())), sorted(warnings)
+
+
+def discover(root: Path, kind: str = "project", config: dict | None = None) -> list[str]:
+    """Return sorted relative POSIX paths of regular (non-symlink) memory files under `root`."""
+    return scan(root, kind, config)[0]

@@ -27,7 +27,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 from . import secrets
-from .discover import discover, is_memory_path
+from .discover import is_memory_path, scan
 
 GLOBAL_ID = "global"
 
@@ -56,14 +56,14 @@ class PunkError(Exception):
 
 @dataclass
 class Action:
-    kind: str  # add | update | delete | conflict | blocked | stale | missing
+    kind: str  # add | update | delete | conflict | blocked | stale | missing | skipped
     sat: str
     rel: str = ""
     note: str = ""
 
     def __str__(self) -> str:
         mark = {"add": "+", "update": "~", "delete": "-", "conflict": "!", "blocked": "x",
-                "stale": "?", "missing": "?"}.get(self.kind, " ")
+                "stale": "?", "missing": "?", "skipped": "?"}.get(self.kind, " ")
         where = f"{self.sat}/{self.rel}" if self.rel else self.sat
         return f"  {mark} {self.kind:<8} {where}" + (f"  ({self.note})" if self.note else "")
 
@@ -136,6 +136,43 @@ def _safe_target(root: Path, rel: str) -> Path:
     return target
 
 
+def _inside(root: Path, rel: str) -> bool:
+    """True if `rel`'s parent directory resolves inside `root` (the entry itself is not followed)."""
+    resolved_root = root.resolve()
+    parent = (root / rel).parent.resolve()
+    return parent == resolved_root or resolved_root in parent.parents
+
+
+OUTSIDE = "<outside>"
+
+
+def _local_link(root: Path, rel: str) -> str | None:
+    """Where the symlink at root/rel points (root-relative), OUTSIDE, or None if it is no symlink."""
+    full = root / rel
+    if not full.is_symlink():
+        return None
+    try:
+        return full.resolve().relative_to(root.resolve()).as_posix()
+    except (ValueError, OSError, RuntimeError):
+        return OUTSIDE
+
+
+def _set_link(links: dict, rel: str, target: str | None) -> None:
+    if target is None:
+        links.pop(rel, None)
+    else:
+        links[rel] = target
+
+
+def _make_link(root: Path, rel: str, target: str) -> None:
+    """Create root/rel as a relative symlink to root/target, replacing whatever is there."""
+    dst = root / rel
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if os.path.lexists(dst):
+        dst.unlink()
+    os.symlink(os.path.relpath(root / target, dst.parent), dst)
+
+
 class Store:
     def __init__(self, root: Path | str | None = None):
         self.root = Path(root).expanduser() if root else default_home()
@@ -170,6 +207,7 @@ class Store:
         state.setdefault("machine", socket.gethostname())
         state.setdefault("paths", {})
         state.setdefault("synced", {})
+        state.setdefault("links", {})  # {sid: {link rel: target rel}} as of the last sync
         return state
 
     def save_state(self, state: dict) -> None:
@@ -268,6 +306,7 @@ class Store:
             raise PunkError(f"unknown satellite: {sid}")
         state["paths"].pop(sid, None)
         state["synced"].pop(sid, None)
+        state["links"].pop(sid, None)
         self.save_state(state)
         if purge:
             validate_id(sid)
@@ -302,6 +341,34 @@ class Store:
     def _kind(self, sid: str) -> str:
         return "global" if sid == GLOBAL_ID else self.satellites().get(sid, {}).get("kind", "project")
 
+    def _meta_path(self, sid: str) -> Path:
+        return self.root / "satellites" / f"{validate_id(sid)}.json"
+
+    def links(self, sid: str) -> dict[str, str]:
+        """Symlinked memories recorded for a satellite: {link relpath: target relpath}."""
+        try:
+            links = json.loads(self._meta_path(sid).read_text()).get("links", {})
+        except (FileNotFoundError, ValueError, AttributeError):
+            return {}
+        if not isinstance(links, dict):
+            return {}
+        return {k: v for k, v in links.items() if isinstance(k, str) and isinstance(v, str)}
+
+    def _write_links(self, sid: str, links: dict[str, str]) -> None:
+        path = self._meta_path(sid)
+        try:
+            meta = json.loads(path.read_text())
+        except (FileNotFoundError, ValueError):
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        if links:
+            meta["links"] = dict(sorted(links.items()))
+        else:
+            meta.pop("links", None)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(meta, indent=2) + "\n")
+
     # ------------------------------------------------------------------- save
     def save(self, ids: list[str] | None = None, *, message: str | None = None, redact: bool = False,
              allow_secrets: bool = False, force: bool = False, dry_run: bool = False) -> list[Action]:
@@ -314,7 +381,8 @@ class Store:
                 actions.append(Action("missing", sid, note=f"{root} not found on this machine"))
                 continue
             kind = self._kind(sid)
-            found = discover(root, kind, cfg)
+            found, local_links, warnings = scan(root, kind, cfg)
+            actions.extend(Action("skipped", sid, rel, why) for rel, why in warnings)
             synced = state["synced"].setdefault(sid, {})
             dest = self.records / sid
             for rel in found:
@@ -362,10 +430,108 @@ class Store:
                         del synced[rel]
                 else:
                     actions.append(Action("conflict", sid, rel, "deleted here but changed in the store"))
+            actions.extend(self._save_links(sid, local_links, state, force=force, dry_run=dry_run))
         if not dry_run:
             self.save_state(state)
             n = sum(a.kind in ("add", "update", "delete") for a in actions)
             self.commit(message or f"save {n} memories from {state['machine']}")
+        return actions
+
+    def _save_links(self, sid: str, local: dict[str, str], state: dict, *, force: bool,
+                    dry_run: bool) -> list[Action]:
+        """Three-way merge of this machine's symlinked memories into satellites/<sid>.json."""
+        actions = []
+        base = state["links"].setdefault(sid, {})
+        stored = self.links(sid)
+        new = dict(stored)
+        for rel in sorted(set(local) | set(stored) | set(base)):
+            loc, rec, old = local.get(rel), stored.get(rel), base.get(rel)
+            if loc == rec:
+                if not dry_run:
+                    _set_link(base, rel, loc)
+                continue
+            if loc == old:
+                continue  # unchanged here; `punk restore` applies the store's version
+            if rec != old and not force:
+                actions.append(Action("conflict", sid, rel, "symlink changed here and in the store"))
+                continue
+            if loc is None:
+                actions.append(Action("delete", sid, rel, "symlink"))
+                new.pop(rel, None)
+            else:
+                actions.append(Action("update" if rec else "add", sid, rel, f"symlink -> {loc}"))
+                new[rel] = loc
+            if not dry_run:
+                _set_link(base, rel, loc)
+        if new != stored and not dry_run:
+            self._write_links(sid, new)
+        return actions
+
+    def _restore_links(self, sid: str, root: Path, kind: str, cfg: dict, state: dict,
+                       recfiles: list[str], *, force: bool, prune: bool, dry_run: bool) -> list[Action]:
+        """Recreate the store's symlinked memories locally, never clobbering local changes."""
+        actions = []
+        base = state["links"].setdefault(sid, {})
+        synced = state["synced"].setdefault(sid, {})
+        stored = self.links(sid)
+        for rel in sorted(set(stored) | set(base)):
+            rec, old = stored.get(rel), base.get(rel)
+            if rec is not None and not (is_memory_path(rel, kind, cfg) and is_memory_path(rec, kind, cfg)):
+                actions.append(Action("blocked", sid, rel, "symlink outside memory paths; refusing to create it"))
+                continue
+            if not _inside(root, rel) or (rec is not None and not _inside(root, rec)):
+                actions.append(Action("blocked", sid, rel, "symlink would leave the satellite; refusing"))
+                continue
+            if rec is not None and (rec == rel or (root / rec).is_dir()):
+                actions.append(Action("blocked", sid, rel, f"symlink to {rec} must point to a file"))
+                continue
+            dst = root / rel
+            loc = _local_link(root, rel)
+            if loc == rec:
+                if not dry_run:
+                    _set_link(base, rel, rec)
+                continue
+            if rec == old:
+                continue  # store unchanged; local changes wait for `punk save`
+            exists = os.path.lexists(dst)
+            if rec is None:  # removed from the store
+                if loc != old:
+                    if not dry_run:
+                        base.pop(rel, None)
+                    continue
+                if rel in recfiles or prune:  # replaced by a regular file upstream, or pruning
+                    actions.append(Action("delete", sid, rel, "symlink"))
+                    if not dry_run:
+                        dst.unlink()
+                        base.pop(rel, None)
+                else:
+                    actions.append(Action("stale", sid, rel, "symlink removed from the store; --prune deletes it here"))
+                continue
+            plain = exists and loc is None and dst.is_file()
+            replaceable = plain and rel in synced and rel not in recfiles and \
+                sha(dst.read_bytes()) == synced[rel]["local"]
+            safe = loc == old and (not exists or loc is not None or replaceable)
+            if not safe and not force:
+                note = ("regular file here, symlink in the store" if plain
+                        else "symlink changed here and in the store")
+                actions.append(Action("conflict", sid, rel, note))
+                continue
+            note = f"symlink -> {rec}"
+            backup = plain and not replaceable
+            if backup:
+                note += f"; local copy kept as {Path(rel).name}.punk-bak"
+            actions.append(Action("update" if exists else "add", sid, rel, note))
+            if dry_run:
+                continue
+            try:
+                if backup:
+                    shutil.copy2(dst, dst.with_name(dst.name + ".punk-bak"))
+                _make_link(root, rel, rec)
+            except OSError as e:
+                actions[-1] = Action("blocked", sid, rel, f"could not create symlink: {e}")
+                continue
+            base[rel] = rec
+            synced.pop(rel, None)
         return actions
 
     # ---------------------------------------------------------------- restore
@@ -382,12 +548,32 @@ class Store:
             kind = self._kind(sid)
             synced = state["synced"].setdefault(sid, {})
             recfiles = _files_under(self.records / sid)
+            actions.extend(self._restore_links(sid, root, kind, cfg, state, recfiles,
+                                               force=force, prune=prune, dry_run=dry_run))
+            stored_links = self.links(sid)
             for rel in recfiles:
                 if not is_memory_path(rel, kind, cfg):
                     actions.append(Action("blocked", sid, rel, "not a memory path; refusing to write it"))
                     continue
                 rdata = (self.records / sid / rel).read_bytes()
                 rec = sha(rdata)
+                dst = root / rel
+                if dst.is_symlink():  # never write through a link
+                    st = synced.get(rel)
+                    if st and rec == st["record"]:
+                        continue  # store unchanged; the new local symlink waits for `punk save`
+                    if not force:
+                        actions.append(Action("conflict", sid, rel, "symlink here, regular file in the store"))
+                        continue
+                    actions.append(Action("update", sid, rel, "replaced local symlink"))
+                    if not dry_run:
+                        if not _inside(root, rel):
+                            raise PunkError(f"refusing to write outside {root}: {rel}")
+                        dst.unlink()
+                        dst.write_bytes(rdata)
+                        synced[rel] = {"local": rec, "record": rec}
+                        state["links"][sid].pop(rel, None)
+                    continue
                 dst = _safe_target(root, rel)
                 loc = sha(dst.read_bytes()) if dst.is_file() else None
                 st = synced.get(rel)
@@ -412,8 +598,10 @@ class Store:
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     dst.write_bytes(rdata)
                     synced[rel] = {"local": rec, "record": rec}
-            for rel in sorted(set(synced) - set(recfiles)):
+            for rel in sorted(set(synced) - set(recfiles) - set(stored_links)):
                 dst = root / rel
+                if dst.is_symlink():
+                    continue  # became a symlink here; `punk save` records it
                 if not dst.is_file():
                     if not dry_run:
                         del synced[rel]
