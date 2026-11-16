@@ -297,6 +297,16 @@ class TestPortability(unittest.TestCase):
         self.assertEqual(offenders, [])
 
 
+class TestReadme(unittest.TestCase):
+    def test_links_work_on_pypi(self):
+        """PyPI renders README.md as the project page and cannot resolve relative links or images."""
+        import re
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        relative = [t for t in re.findall(r"\]\(([^)\s]+)\)", text) if not t.startswith(("https://", "http://", "#"))]
+        relative += re.findall(r"<img[^>]+src=[\"'](?!https?://)([^\"']+)", text)
+        self.assertEqual(relative, [])
+
+
 class TestMCP(Base):
     def test_tools(self):
         s = Store(self.tmp / "s")
