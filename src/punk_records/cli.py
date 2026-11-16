@@ -190,7 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", metavar="command")
 
     def add(name, fn, help, aliases=()):
-        sp = sub.add_parser(name, help=help, aliases=list(aliases))
+        sp = sub.add_parser(name, help=help, description=help, aliases=list(aliases))
         sp.set_defaults(fn=fn)
         return sp
 

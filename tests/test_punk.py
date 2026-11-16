@@ -605,6 +605,14 @@ class TestDiff(Base):
         self.assertIn("-from elsewhere", by_rel["napkin.md"])
         self.assertEqual([d.rel for d in s.diff([sid], "napkin.md")], ["napkin.md"])
 
+    def test_help_documents_exit_code(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        out = StringIO()
+        with redirect_stdout(out), self.assertRaises(SystemExit):
+            cli.main(["diff", "--help"])
+        self.assertIn("exit 1 if they do", " ".join(out.getvalue().split()))
+
     def test_bad_arguments(self):
         s, p, sid = self.setup_store()
         code, _, err = self.run_cli("diff", "github.com/nope/nope")
