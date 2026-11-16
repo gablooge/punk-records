@@ -1,12 +1,21 @@
 # Punk Records
 
+[![PyPI](https://img.shields.io/pypi/v/punk-records)](https://pypi.org/project/punk-records/)
+[![Python](https://img.shields.io/pypi/pyversions/punk-records)](https://pypi.org/project/punk-records/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/gablooge/punk-records/blob/main/LICENSE)
+
 **One brain for all your AI agents.** Persist every `CLAUDE.md`, `AGENTS.md`, napkin, and rules file
 from every project and machine in a single versioned store. Sync it over any git remote, or carry it
 across an air gap on a USB stick. Agents can read and write it live over MCP.
 
-> On Egghead, Dr. Vegapunk keeps one shared brain, the Punk Records. His satellites each go off
+> On [Egghead](https://onepiece.fandom.com/wiki/Egghead), Dr.
+> [Vegapunk](https://onepiece.fandom.com/wiki/Vegapunk) keeps one shared brain, the
+> [Punk Records](https://onepiece.fandom.com/wiki/Punk_Records). His satellites each go off
 > and learn things, and whatever they learn flows back into that shared brain. This project does the
 > same for your agents: each project and machine is a satellite, and `~/.punk-records` is the brain.
+>
+> <sub>The name is a nod to *One Piece* (the linked wiki pages contain spoilers). This is a fan-named
+> project, not affiliated with Eiichiro Oda, Shueisha or Toei Animation.</sub>
 
 ## Why
 
@@ -31,7 +40,7 @@ inside the store (`{"include": ["docs/ai/*.md"], "exclude": []}`).
 Requires Python 3.9+ and git. No other dependencies.
 
 ```bash
-pipx install git+https://github.com/<you>/punk-records
+pipx install punk-records      # or: pip install punk-records
 ```
 
 ## Quickstart
@@ -99,6 +108,15 @@ project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
   add lines to the same `CLAUDE.md`, the result contains both sets of lines.
 - **Deletes propagate on save.** Locally removing a file that was synced removes it from the store.
   Deletions coming *from* the store are only reported, unless you pass `restore --prune`.
+- **Symlinked memories are kept as links.** If `AGENTS.md -> CLAUDE.md`, the content is stored once
+  and the link is recorded in `satellites/<id>.json`, then recreated on other machines. Only links
+  that resolve to a memory file inside the same project are recorded. Links that point outside the
+  project are never followed. `punk scan` and `punk save` warn about them instead.
+- **Dotfiles work.** For global memories, a link such as `~/.claude/CLAUDE.md ->
+  ~/dotfiles/claude/CLAUDE.md` is followed: the content is stored, and restores write through the
+  link into your dotfiles repo. Only non-executable Markdown/text files (or files with the same name
+  as the link) inside `$HOME` are followed, never anything under `.git`, `.ssh`, `.gnupg`, `.aws`
+  and similar.
 
 ## Safety
 
@@ -107,8 +125,9 @@ project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
   file is blocked by default. You can pass `--redact` to store it with secrets replaced, or put
   `punk:allow` on a line to mark a false positive.
 - **Restricted writes.** `restore` only writes paths that match the memory patterns. It never writes
-  into `.git/`, outside the project, or through `..`, so a tampered store or bundle can't plant hooks
-  or scripts in your repos.
+  into `.git/`, outside the project, through `..`, or through an existing symlink. Recreated symlinks
+  must point from one memory path to another inside the project, so a tampered store or bundle can't
+  plant hooks or scripts in your repos.
 - **Keep the remote private.** Memories describe your code and habits. If you need encryption at
   rest on a third-party host, [git-crypt](https://github.com/AGWA/git-crypt) works transparently
   on the store repo.
