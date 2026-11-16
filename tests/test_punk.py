@@ -348,6 +348,10 @@ class TestMCP(Base):
         self.assertEqual((p / "CLAUDE.md").read_bytes(), "caf\u00e9\n- \u2713 na\u00efve \u65e5\u672c\n".encode())
 
 
+# Relative link targets use the OS separator, as a user's `ln -s` or `mklink` would; Windows does not
+# resolve "/" in a relative symlink target.
+
+
 def can_symlink():
     with tempfile.TemporaryDirectory() as d:
         try:
@@ -383,7 +387,7 @@ class TestSymlinks(Base):
         (self.tmp / "outside.md").write_text("elsewhere\n")
         (p / "docs").mkdir()
         os.symlink("CLAUDE.md", p / "AGENTS.md")
-        os.symlink("../CLAUDE.md", p / "docs" / "GEMINI.md")
+        os.symlink(os.path.join("..", "CLAUDE.md"), p / "docs" / "GEMINI.md")
         os.symlink("README.md", p / "AGENT.md")
         os.symlink(str(self.tmp / "outside.md"), p / "napkin.md")
         os.symlink("missing.md", p / "CLAUDE.local.md")
@@ -403,7 +407,7 @@ class TestSymlinks(Base):
         a, pa, b, pb, sid = self.remote_pair()
         (pa / "sub").mkdir()
         os.symlink("CLAUDE.md", pa / "AGENTS.md")
-        os.symlink("../CLAUDE.md", pa / "sub" / "AGENTS.md")
+        os.symlink(os.path.join("..", "CLAUDE.md"), pa / "sub" / "AGENTS.md")
         acts = a.sync()
         self.assertIn(("add", "AGENTS.md"), [(x.kind, x.rel) for x in acts])
         meta = json.loads((a.root / "satellites" / f"{sid}.json").read_text())
@@ -588,7 +592,7 @@ class TestSymlinks(Base):
         (dot / "CLAUDE.md").write_text("I like short answers\n")
         (dot / "review.md").write_text("review command\n")
         (home / ".claude" / "commands").mkdir(parents=True)
-        os.symlink("../dotfiles/claude/CLAUDE.md", home / ".claude" / "CLAUDE.md")
+        os.symlink(os.path.join("..", "dotfiles", "claude", "CLAUDE.md"), home / ".claude" / "CLAUDE.md")
         os.symlink(str(dot / "review.md"), home / ".claude" / "commands" / "review.md")
         found = scan(home, "global")
         self.assertEqual(found.files, [".claude/CLAUDE.md", ".claude/commands/review.md"])
