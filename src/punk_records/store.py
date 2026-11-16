@@ -33,10 +33,15 @@ from .discover import followed_target, is_memory_path, scan
 GLOBAL_ID = "global"
 
 GITATTRIBUTES = """\
+# Store every file byte for byte (no CRLF conversion), so hashes match on every OS.
+* -text
 # Memories are mostly append-style notes. When two machines edit the same file,
 # keep both sides' lines instead of stopping on a merge conflict.
 records/** merge=union
 """
+
+# Git for Windows defaults to core.autocrlf=true; the store must never convert line endings.
+GIT_STORE_CONFIG = ("core.autocrlf", "false")
 
 STORE_README = """\
 # Punk Records
@@ -90,6 +95,19 @@ def _eol(data: bytes) -> str:
     return "LF" if not crlf else "CRLF" if crlf == data.count(b"\n") else "mixed"
 
 
+def _write_text(path: Path, text: str) -> None:
+    """UTF-8, LF line endings on every OS (Path.write_text has no `newline` before 3.10)."""
+    path.write_bytes(text.encode("utf-8"))
+
+
+def _read_json(path: Path):
+    return json.loads(path.read_bytes().decode("utf-8"))
+
+
+def _git_run(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], capture_output=True, encoding="utf-8", errors="replace")
+
+
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -122,8 +140,7 @@ def normalize_remote(url: str) -> str | None:
 
 def derive_id(path: Path) -> str:
     """Stable id for a project, the same on every machine when it has a git remote."""
-    r = subprocess.run(["git", "-C", str(path), "config", "--get", "remote.origin.url"],
-                       capture_output=True, text=True)
+    r = _git_run(["-C", str(path), "config", "--get", "remote.origin.url"])
     remote = normalize_remote(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
     return remote or f"local/{_slug(Path(path).resolve().name)}"
 
@@ -216,14 +233,14 @@ class Store:
             raise PunkError(f"no store at {self.root} - run `punk init` first")
 
     def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-        r = subprocess.run(["git", "-C", str(self.root), *args], capture_output=True, text=True)
+        r = _git_run(["-C", str(self.root), *args])
         if check and r.returncode != 0:
             raise PunkError(f"git {' '.join(args)} failed:\n{(r.stderr or r.stdout).strip()}")
         return r
 
     def load_state(self) -> dict:
         try:
-            state = json.loads(self.state_path.read_text())
+            state = _read_json(self.state_path)
         except FileNotFoundError:
             state = {}
         state.setdefault("machine", socket.gethostname())
@@ -234,12 +251,12 @@ class Store:
 
     def save_state(self, state: dict) -> None:
         tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, indent=2, sort_keys=True))
+        _write_text(tmp, json.dumps(state, indent=2, sort_keys=True))
         tmp.replace(self.state_path)
 
     def config(self) -> dict:
         try:
-            return json.loads((self.root / "punk.json").read_text())
+            return _read_json(self.root / "punk.json")
         except FileNotFoundError:
             return {}
 
@@ -264,8 +281,7 @@ class Store:
             raise PunkError(f"a store already exists at {self.root}")
         if remote:
             self.root.parent.mkdir(parents=True, exist_ok=True)
-            r = subprocess.run(["git", "clone", "-q", remote, str(self.root)],
-                               capture_output=True, text=True)
+            r = _git_run(["clone", "-q", "-c", "=".join(GIT_STORE_CONFIG), remote, str(self.root)])
             if r.returncode != 0:
                 raise PunkError(f"git clone failed:\n{r.stderr.strip()}")
             if self.git("rev-parse", "--verify", "HEAD", check=False).returncode != 0:
@@ -274,6 +290,7 @@ class Store:
             self.root.mkdir(parents=True, exist_ok=True)
             self.git("init", "-q")
             self.git("symbolic-ref", "HEAD", "refs/heads/main")
+        self.git("config", *GIT_STORE_CONFIG)
         state = self.load_state()
         if machine:
             state["machine"] = machine
@@ -284,7 +301,7 @@ class Store:
         for name, content in ((".gitattributes", GITATTRIBUTES), ("README.md", STORE_README),
                               ("punk.json", json.dumps({"include": [], "exclude": []}, indent=2) + "\n")):
             if not (self.root / name).exists():
-                (self.root / name).write_text(content)
+                _write_text(self.root / name, content)
         self.commit(f"init punk records on {state['machine']}")
         if track_global:
             self.track(Path.home(), sid=GLOBAL_ID, kind="global")
@@ -296,7 +313,7 @@ class Store:
         for f in sorted(base.rglob("*.json")) if base.is_dir() else []:
             sid = f.relative_to(base).as_posix()[: -len(".json")]
             try:
-                out[sid] = json.loads(f.read_text())
+                out[sid] = _read_json(f)
             except ValueError:
                 out[sid] = {}
         return out
@@ -309,13 +326,12 @@ class Store:
         sid = validate_id(sid or derive_id(path))
         meta_path = self.root / "satellites" / f"{sid}.json"
         if not meta_path.exists():
-            remote = subprocess.run(["git", "-C", str(path), "config", "--get", "remote.origin.url"],
-                                    capture_output=True, text=True).stdout.strip()
+            remote = _git_run(["-C", str(path), "config", "--get", "remote.origin.url"]).stdout.strip()
             meta = {"name": path.name if kind != "global" else "global", "kind": kind}
             if remote and kind != "global":
                 meta["remote"] = remote
             meta_path.parent.mkdir(parents=True, exist_ok=True)
-            meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+            _write_text(meta_path, json.dumps(meta, indent=2) + "\n")
             self.commit(f"track {sid}")
         state = self.load_state()
         state["paths"][sid] = str(path)
@@ -369,7 +385,7 @@ class Store:
     def links(self, sid: str) -> dict[str, str]:
         """Symlinked memories recorded for a satellite: {link relpath: target relpath}."""
         try:
-            links = json.loads(self._meta_path(sid).read_text()).get("links", {})
+            links = _read_json(self._meta_path(sid)).get("links", {})
         except (FileNotFoundError, ValueError, AttributeError):
             return {}
         if not isinstance(links, dict):
@@ -389,7 +405,7 @@ class Store:
     def _write_links(self, sid: str, links: dict[str, str]) -> None:
         path = self._meta_path(sid)
         try:
-            meta = json.loads(path.read_text())
+            meta = _read_json(path)
         except (FileNotFoundError, ValueError):
             meta = {}
         if not isinstance(meta, dict):
@@ -399,7 +415,7 @@ class Store:
         else:
             meta.pop("links", None)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(meta, indent=2) + "\n")
+        _write_text(path, json.dumps(meta, indent=2) + "\n")
 
     # ------------------------------------------------------------------- save
     def save(self, ids: list[str] | None = None, *, message: str | None = None, redact: bool = False,
@@ -789,11 +805,14 @@ class Store:
         if secrets.scan(text):
             raise PunkError("refusing to store text that looks like a secret")
         target = _safe_target(self.records / sid, rel)
-        existing = target.read_text("utf-8") if target.is_file() else ""
-        if existing and not existing.endswith("\n"):
-            existing += "\n"
+        existing = target.read_bytes() if target.is_file() else b""
+        existing.decode("utf-8")  # refuse to append to a file that is not UTF-8 text
+        eol = b"\r\n" if b"\r\n" in existing else b"\n"  # keep the file's own line endings
+        if existing and not existing.endswith(b"\n"):
+            existing += eol
+        lines = text.rstrip().replace("\r\n", "\n").split("\n")
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(existing + text.rstrip() + "\n", "utf-8")
+        target.write_bytes(existing + eol.join(x.encode("utf-8") for x in lines) + eol)
         self.commit(f"remember in {sid}/{rel}")
         if local_root:
             self.restore([sid])

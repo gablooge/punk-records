@@ -126,17 +126,20 @@ def handle(store: Store, msg: dict) -> dict | None:
         return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32603, "message": str(e)}}
 
 
-def serve(store: Store) -> None:
-    for line in sys.stdin:
-        line = line.strip()
+def serve(store: Store, stdin=None, stdout=None) -> None:
+    """Newline-delimited JSON-RPC over raw bytes: always UTF-8 and "\\n", whatever the OS locale."""
+    stdin = stdin or sys.stdin.buffer
+    stdout = stdout or sys.stdout.buffer
+    for raw in stdin:
+        line = raw.strip()
         if not line:
             continue
         try:
-            msg = json.loads(line)
-        except ValueError:
+            msg = json.loads(line.decode("utf-8"))
+        except ValueError:  # includes UnicodeDecodeError
             reply = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}
         else:
             reply = handle(store, msg)
         if reply is not None:
-            sys.stdout.write(json.dumps(reply) + "\n")
-            sys.stdout.flush()
+            stdout.write(json.dumps(reply).encode("utf-8") + b"\n")
+            stdout.flush()

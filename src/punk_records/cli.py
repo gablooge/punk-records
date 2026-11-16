@@ -270,7 +270,19 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _utf8_when_piped() -> None:
+    """Pipes and files get UTF-8 (`punk context | llm`), not the locale codepage (cp1252 on Windows).
+
+    Consoles are left alone: Python already writes Unicode to them correctly.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure and not stream.isatty() and (stream.encoding or "").lower().replace("-", "") != "utf8":
+            reconfigure(encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_when_piped()
     parser = build_parser()
     a = parser.parse_args(argv)
     if not getattr(a, "fn", None):
