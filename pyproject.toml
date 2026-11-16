@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "punk-records"
+version = "0.1.0"
+description = "One brain for all your AI agents' memories (CLAUDE.md, AGENTS.md, napkins, rules), synced online or air-gapped."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = []
+keywords = ["ai", "memory", "claude", "agents", "mcp", "cursor", "codex", "sync", "air-gapped"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Environment :: Console",
+  "Topic :: Software Development",
+]
+
+[project.scripts]
+punk = "punk_records.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
