@@ -549,5 +549,97 @@ class TestSymlinks(Base):
         self.assertIn("CLAUDE.md: symlink points outside", err.getvalue())
 
 
+class TestDiff(Base):
+    def setup_store(self):
+        s = Store(self.tmp / "s")
+        s.init(track_global=False)
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("one\ntwo\n")
+        sid = s.track(p)
+        s.save()
+        return s, p, sid
+
+    def run_cli(self, *args):
+        from contextlib import redirect_stderr, redirect_stdout
+        from io import StringIO
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = cli.main(["--home", str(self.tmp / "s"), *args])
+        return code, out.getvalue(), err.getvalue()
+
+    def test_no_differences(self):
+        s, p, sid = self.setup_store()
+        self.assertEqual(s.diff(), [])
+        code, out, _ = self.run_cli("diff")
+        self.assertEqual((code, out.strip()), (0, "no differences"))
+
+    def test_local_edit_shown_as_unified_diff(self):
+        s, p, sid = self.setup_store()
+        (p / "CLAUDE.md").write_text("one\n2\n")
+        [d] = s.diff()
+        self.assertEqual((d.sat, d.rel), (sid, "CLAUDE.md"))
+        self.assertIn(f"--- store/{sid}/CLAUDE.md", d.text)
+        self.assertIn(f"+++ local/{sid}/CLAUDE.md", d.text)
+        self.assertIn("-two\n", d.text)
+        self.assertIn("+2\n", d.text)
+        code, out, _ = self.run_cli("diff", sid, "CLAUDE.md")
+        self.assertEqual(code, 1)
+        self.assertIn("+2", out)
+
+    def test_missing_final_newline_is_marked(self):
+        s, p, sid = self.setup_store()
+        (p / "CLAUDE.md").write_text("one\ntwo")
+        [d] = s.diff()
+        self.assertTrue(d.text.endswith("-two\n+two\n\\ No newline at end of file\n"), d.text)
+
+    def test_files_on_one_side_only(self):
+        s, p, sid = self.setup_store()
+        (p / "AGENTS.md").write_text("new here\n")
+        (s.records / sid / "napkin.md").write_text("from elsewhere\n")
+        s.commit("other machine")
+        by_rel = {d.rel: d.text for d in s.diff([sid])}
+        self.assertEqual(sorted(by_rel), ["AGENTS.md", "napkin.md"])
+        self.assertIn("--- /dev/null", by_rel["AGENTS.md"])
+        self.assertIn("+new here", by_rel["AGENTS.md"])
+        self.assertIn("+++ /dev/null", by_rel["napkin.md"])
+        self.assertIn("-from elsewhere", by_rel["napkin.md"])
+        self.assertEqual([d.rel for d in s.diff([sid], "napkin.md")], ["napkin.md"])
+
+    def test_bad_arguments(self):
+        s, p, sid = self.setup_store()
+        code, _, err = self.run_cli("diff", "github.com/nope/nope")
+        self.assertEqual(code, 2)
+        self.assertIn("not tracked", err)
+        code, _, err = self.run_cli("diff", sid, "README.md")
+        self.assertEqual(code, 2)
+        self.assertIn("not a memory", err)
+
+    @unittest.skipUnless(can_symlink(), "symlinks not supported here")
+    def test_link_difference_shown(self):
+        s, p, sid = self.setup_store()
+        os.symlink("CLAUDE.md", p / "AGENTS.md")
+        [d] = s.diff()
+        self.assertEqual(d.rel, "AGENTS.md")
+        self.assertIn("symlink", d.text)
+        self.assertIn("store: (none)", d.text)
+        self.assertIn("local: -> CLAUDE.md", d.text)
+
+    def test_tampered_record_never_reads_local_file(self):
+        s, p, sid = self.setup_store()
+        (p / "run.sh").write_text("local secret script\n")
+        (s.records / sid / "run.sh").write_text("x\n")
+        s.commit("tampered")
+        self.assertEqual(s.diff(), [])
+
+    def test_conflict_message_points_to_diff(self):
+        s, p, sid = self.setup_store()
+        (s.records / sid / "CLAUDE.md").write_text("store v2\n")
+        s.commit("other machine")
+        (p / "CLAUDE.md").write_text("local v2\n")
+        code, out, err = self.run_cli("restore")
+        self.assertEqual(code, 1)
+        self.assertIn(f"punk diff {sid} CLAUDE.md", err)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -15,6 +15,7 @@ last sync, so we can tell "I edited it" from "another machine edited it" from
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -66,6 +67,22 @@ class Action:
                 "stale": "?", "missing": "?", "skipped": "?"}.get(self.kind, " ")
         where = f"{self.sat}/{self.rel}" if self.rel else self.sat
         return f"  {mark} {self.kind:<8} {where}" + (f"  ({self.note})" if self.note else "")
+
+
+@dataclass
+class Diff:
+    sat: str
+    rel: str
+    text: str  # unified diff (store -> local), or a note for symlinks
+
+
+def _diff_lines(data: bytes | None) -> list[str]:
+    if data is None:
+        return []
+    lines = data.decode("utf-8", "replace").splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n\\ No newline at end of file\n"
+    return lines
 
 
 def sha(data: bytes) -> str:
@@ -667,6 +684,45 @@ class Store:
         actions = self.save(**save_kw)
         self.pull(str(path), mine if mine in heads else heads[0])
         return actions + self.restore()
+
+    # ------------------------------------------------------------------- diff
+    def diff(self, ids: list[str] | None = None, rel: str | None = None) -> list[Diff]:
+        """What differs between this machine's memories and the store, as unified diffs.
+
+        `-` lines are the store copy, `+` lines the local file. Only memory paths are compared,
+        and local files are read only if discovery would save them.
+        """
+        self.require()
+        state, cfg, out = self.load_state(), self.config(), []
+        for sid in self._local_ids(state, ids):
+            root, kind = Path(state["paths"][sid]), self._kind(sid)
+            if rel is not None and not is_memory_path(rel, kind, cfg):
+                raise PunkError(f"{rel} is not a memory path (e.g. CLAUDE.md, AGENTS.md, napkin.md)")
+            if not root.is_dir():
+                out.append(Diff(sid, "", f"{root} not found on this machine\n"))
+                continue
+            scanned = scan(root, kind, cfg)
+            local = set(scanned.files)
+            stored = {r for r in _files_under(self.records / sid) if is_memory_path(r, kind, cfg)}
+            links = self.links(sid)
+            for r in sorted(local | stored | set(scanned.links) | set(links)):
+                if rel is not None and r != rel:
+                    continue
+                here, there = scanned.links.get(r), links.get(r)
+                if here != there:
+                    out.append(Diff(sid, r, f"symlink {sid}/{r}\n"
+                                            f"  store: {'-> ' + there if there else '(none)'}\n"
+                                            f"  local: {'-> ' + here if here else '(none)'}\n"))
+                a = (self.records / sid / r).read_bytes() if r in stored else None
+                b = (root / r).read_bytes() if r in local else None
+                if a == b:
+                    continue
+                text = "".join(difflib.unified_diff(
+                    _diff_lines(a), _diff_lines(b),
+                    f"store/{sid}/{r}" if a is not None else "/dev/null",
+                    f"local/{sid}/{r}" if b is not None else "/dev/null"))
+                out.append(Diff(sid, r, text or f"{sid}/{r}: bytes differ (encoding or line endings)\n"))
+        return out
 
     # ------------------------------------------------------------ consumption
     def memories(self, sid: str | None = None) -> list[tuple[str, str]]:

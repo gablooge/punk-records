@@ -102,8 +102,9 @@ project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
   knowledge changed over time, and nothing is ever truly lost.
 - **Three-way per file.** Punk records the local and store hash of each file at its last sync, which
   lets it tell "edited here" apart from "edited on another machine". When both sides changed, it
-  reports a **conflict** and leaves both copies alone. You resolve it with `save --force` (local wins)
-  or `restore --force` (store wins, and your local copy is kept as `.punk-bak`).
+  reports a **conflict** and leaves both copies alone. `punk diff <satellite> <path>` shows what
+  differs (`-` store, `+` local). You resolve it with `save --force` (local wins) or
+  `restore --force` (store wins, and your local copy is kept as `.punk-bak`).
 - **Concurrent appends merge.** Memory files use git's `union` merge driver, so when two machines
   add lines to the same `CLAUDE.md`, the result contains both sets of lines.
 - **Deletes propagate on save.** Locally removing a file that was synced removes it from the store.
@@ -140,6 +141,7 @@ track [DIR...]    start persisting a project      untrack ID [--purge]
 list | scan       what is tracked / what would be captured
 save | restore    store <-> local projects (--dry-run, --force)
 status            what save/restore would do
+diff [ID] [PATH]  unified diff of local memories vs the store
 sync              save, pull/push remote, restore
 export | import   air-gapped bundle files
 search | show | context | remember

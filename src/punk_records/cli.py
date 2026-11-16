@@ -20,9 +20,12 @@ def _report(actions, quiet_ok: str = "nothing to do") -> int:
         print(quiet_ok)
     bad = [a for a in actions if a.kind in ("conflict", "blocked")]
     if bad:
-        print(f"\n{len(bad)} file(s) need attention. Conflicts: use --force on save (store wins "
-              f"local) or restore (local gets the store copy, with a .punk-bak backup). "
-              f"Secrets: edit them out, add `punk:allow` on the line, or use --redact.", file=sys.stderr)
+        print(f"\n{len(bad)} file(s) need attention. Conflicts: see what differs with `punk diff`, then "
+              f"use --force on save (local wins in the store) or restore (local gets the store copy, "
+              f"with a .punk-bak backup). Secrets: edit them out, add `punk:allow` on the line, or use "
+              f"--redact.", file=sys.stderr)
+        for c in (a for a in bad if a.kind == "conflict" and a.rel):
+            print(f"  punk diff {c.sat} {c.rel}", file=sys.stderr)
         return 1
     return 0
 
@@ -113,6 +116,15 @@ def cmd_status(store: Store, a) -> int:
 
 def cmd_sync(store: Store, a) -> int:
     return _report(store.sync(**_save_kw(a)), "in sync")
+
+
+def cmd_diff(store: Store, a) -> int:
+    diffs = store.diff([a.satellite] if a.satellite else None, a.path)
+    for d in diffs:
+        sys.stdout.write(d.text)
+    if not diffs:
+        print("no differences")
+    return 1 if diffs else 0
 
 
 def cmd_export(store: Store, a) -> int:
@@ -219,6 +231,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("-n", "--dry-run", action="store_true")
 
     add("status", cmd_status, "what save/restore would do")
+
+    sp = add("diff", cmd_diff, "show how local memories differ from the store (exit 1 if they do)")
+    sp.add_argument("satellite", nargs="?", help="satellite id (default: all tracked here)")
+    sp.add_argument("path", nargs="?", help="one memory file, e.g. CLAUDE.md")
 
     sp = add("sync", cmd_sync, "save, pull + push the git remote (if any), restore")
     secret_opts(sp)
