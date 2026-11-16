@@ -284,6 +284,19 @@ class TestCLIEncoding(Base):
         self.assertEqual(r.stdout.replace(b"\r\n", b"\n"), "- \u2713 \u65e5\u672c\n".encode())
 
 
+class TestPortability(unittest.TestCase):
+    def test_product_code_never_writes_text_mode(self):
+        """Text-mode writes turn "\\n" into "\\r\\n" on Windows and break byte-exact hashes. The tests
+        patch Path.write_text to LF for their own fixtures, so this guard keeps product code off it."""
+        import re
+        offenders = []
+        for f in sorted((ROOT / "src" / "punk_records").glob("*.py")):
+            for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                if re.search(r"\.write_text\(|open\([^)]*['\"][wa]t?['\"]", line):
+                    offenders.append(f"{f.name}:{n}: {line.strip()}")
+        self.assertEqual(offenders, [])
+
+
 class TestMCP(Base):
     def test_tools(self):
         s = Store(self.tmp / "s")
