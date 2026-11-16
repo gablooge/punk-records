@@ -20,7 +20,7 @@ development tool only:
 pipx run --spec ruff==0.17.5 ruff check .   # or: pip install ruff==0.17.5 && ruff check .
 ```
 
-CI runs both on Linux, macOS and Windows with Python 3.9 and 3.13.
+CI runs the tests on Linux, macOS and Windows with Python 3.9 and 3.13, and ruff on Linux.
 
 ## Rules
 
@@ -36,8 +36,8 @@ CI runs both on Linux, macOS and Windows with Python 3.9 and 3.13.
   never write in text mode (a test fails if product code calls `write_text` or `open(..., "w")`).
 - **Keep the security invariants.** Read [SECURITY.md](SECURITY.md). Any new code path that writes
   files needs tests showing it cannot write outside memory paths.
-- **Offline first.** Only `punk sync` (and `init`/`import` from a remote or bundle) may touch the
-  network.
+- **Offline first.** Only `punk init <remote>` (clone) and `punk sync` (also the MCP `sync` tool)
+  may touch the network. Everything else, including `punk import` of a bundle file, works offline.
 
 ## Pull requests
 
