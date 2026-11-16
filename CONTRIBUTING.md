@@ -37,7 +37,8 @@ CI runs the tests on Linux, macOS and Windows with Python 3.9 and 3.13, and ruff
 - **Keep the security invariants.** Read [SECURITY.md](SECURITY.md). Any new code path that writes
   files needs tests showing it cannot write outside memory paths.
 - **Offline first.** Only `punk init <remote>` (clone) and `punk sync` (also the MCP `sync` tool)
-  may touch the network. Everything else, including `punk import` of a bundle file, works offline.
+  may touch the network, plus whatever you run through `punk git`. Everything else, including
+  `punk import` of a bundle file, works offline.
 
 ## Pull requests
 
