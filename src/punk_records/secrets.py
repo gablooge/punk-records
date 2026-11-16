@@ -17,7 +17,8 @@ PATTERNS = [
     ("slack-token", r"\bxox[abposr]-[A-Za-z0-9-]{10,}"),
     ("google-api-key", r"\bAIza[0-9A-Za-z_\-]{35}"),
     ("stripe-key", r"\b(?:sk|rk)_live_[0-9A-Za-z]{20,}"),
-    ("generic-secret", r"(?i)\b(?:api[_-]?key|secret|passw(?:or)?d|access[_-]?token)\b[\"']?\s*[:=]\s*[\"']?[A-Za-z0-9/+_\-]{16,}"),
+    ("generic-secret", r"(?i)\b(?:api[_-]?key|secret|passw(?:or)?d|access[_-]?token)\b"
+                       r"[\"']?\s*[:=]\s*[\"']?[A-Za-z0-9/+_\-]{16,}"),
 ]
 _COMPILED = [(name, re.compile(rx)) for name, rx in PATTERNS]
 

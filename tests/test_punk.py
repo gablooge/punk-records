@@ -14,6 +14,11 @@ from punk_records.discover import discover, is_memory_path, scan  # noqa: E402
 from punk_records.mcp import handle  # noqa: E402
 from punk_records.store import PunkError, Store, normalize_remote  # noqa: E402
 
+# Tests mean LF content on every OS. Path.write_text has no `newline` argument before Python 3.10,
+# and on Windows it would write CRLF.
+Path.write_text = lambda self, data, encoding=None, errors=None: self.write_bytes(  # type: ignore[method-assign]
+    data.encode(encoding or "utf-8", errors or "strict"))
+
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
            "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 
@@ -28,6 +33,7 @@ class Base(unittest.TestCase):
         self._env = dict(os.environ)
         os.environ.update(GIT_ENV)
         os.environ["HOME"] = str(self.tmp / "home")
+        os.environ["USERPROFILE"] = str(self.tmp / "home")  # Path.home() on Windows
         (self.tmp / "home").mkdir()
 
     def tearDown(self):
@@ -116,6 +122,78 @@ class TestSync(Base):
             self.assertIn("- from A", text)
             self.assertIn("- from B", text)
 
+    def test_bytes_survive_autocrlf(self):
+        gitconfig = self.tmp / "gitconfig"
+        gitconfig.write_text("[core]\n\tautocrlf = true\n")  # Git for Windows' default
+        os.environ["GIT_CONFIG_GLOBAL"] = str(gitconfig)
+        remote = self.tmp / "remote.git"
+        git("init", "-q", "--bare", str(remote), cwd=self.tmp)
+        a = Store(self.tmp / "a-store")
+        a.init(machine="a", track_global=False)
+        git("remote", "add", "origin", str(remote), cwd=a.root)
+        pa = self.project("a/app")
+        (pa / "CLAUDE.md").write_bytes(b"lf line\n")
+        (pa / "AGENTS.md").write_bytes(b"crlf line\r\n")
+        a.track(pa)
+        a.sync()
+        b = Store(self.tmp / "b-store")
+        b.init(str(remote), machine="b", track_global=False)
+        pb = self.project("b/app")
+        b.track(pb)
+        b.sync()
+        self.assertEqual((pb / "CLAUDE.md").read_bytes(), b"lf line\n")
+        self.assertEqual((pb / "AGENTS.md").read_bytes(), b"crlf line\r\n")
+        self.assertEqual(b.sync(), [])
+        self.assertEqual(a.sync(), [])
+
+    def two_machines_with_gitconfig(self, gitconfig_text, strip_store_attributes=False):
+        gitconfig = self.tmp / "gitconfig"
+        gitconfig.write_text(gitconfig_text)
+        os.environ["GIT_CONFIG_GLOBAL"] = str(gitconfig)
+        remote = self.tmp / "remote.git"
+        git("init", "-q", "--bare", str(remote), cwd=self.tmp)
+        a = Store(self.tmp / "a-store")
+        a.init(machine="a", track_global=False)
+        if strip_store_attributes:  # a store whose .gitattributes lacks `* -text`
+            (a.root / ".gitattributes").write_text("records/** merge=union\n")
+            a.commit("older attributes")
+        git("remote", "add", "origin", str(remote), cwd=a.root)
+        pa = self.project("a/app")
+        (pa / "CLAUDE.md").write_bytes(b"lf line\n")
+        a.track(pa)
+        a.sync()
+        b = Store(self.tmp / "b-store")
+        b.init(str(remote), machine="b", track_global=False)
+        pb = self.project("b/app")
+        b.track(pb)
+        b.sync()
+        return pb
+
+    def test_store_attributes_beat_global_attributes(self):
+        attrs = self.tmp / "attributes"
+        attrs.write_text("* text eol=crlf\n")
+        pb = self.two_machines_with_gitconfig(f"[core]\n\tattributesFile = {attrs.as_posix()}\n")
+        self.assertEqual((pb / "CLAUDE.md").read_bytes(), b"lf line\n")
+
+    def test_clone_disables_autocrlf_even_without_store_attributes(self):
+        pb = self.two_machines_with_gitconfig("[core]\n\tautocrlf = true\n", strip_store_attributes=True)
+        self.assertEqual((pb / "CLAUDE.md").read_bytes(), b"lf line\n")
+
+    def test_append_keeps_line_endings(self):
+        s = Store(self.tmp / "s")
+        s.init(track_global=False)
+        p = self.project("app")
+        (p / "CLAUDE.md").write_bytes(b"one\r\ntwo\r\n")
+        sid = s.track(p)
+        s.save()
+        s.append(sid, "CLAUDE.md", "three")
+        self.assertEqual((p / "CLAUDE.md").read_bytes(), b"one\r\ntwo\r\nthree\r\n")
+        (p / "napkin.md").write_bytes(b"a\n")
+        s.save()
+        s.append(sid, "napkin.md", "b\nc")
+        self.assertEqual((p / "napkin.md").read_bytes(), b"a\nb\nc\n")
+        self.assertEqual(s.save(), [])
+
     def test_air_gapped_bundle(self):
         a = Store(self.tmp / "a-store")
         a.init(machine="a", track_global=False)
@@ -191,6 +269,34 @@ class TestSync(Base):
         self.assertIn("short answers", s.context(self.tmp))
 
 
+class TestCLIEncoding(Base):
+    def test_piped_output_is_utf8(self):
+        s = Store(self.tmp / "s")
+        s.init(track_global=False)
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("- \u2713 \u65e5\u672c\n")
+        sid = s.track(p)
+        s.save()
+        env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "PYTHONIOENCODING": "cp1252"}  # Windows pipe
+        r = subprocess.run([sys.executable, "-m", "punk_records", "--home", str(s.root), "show", sid, "CLAUDE.md"],
+                           capture_output=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.replace(b"\r\n", b"\n"), "- \u2713 \u65e5\u672c\n".encode())
+
+
+class TestPortability(unittest.TestCase):
+    def test_product_code_never_writes_text_mode(self):
+        """Text-mode writes turn "\\n" into "\\r\\n" on Windows and break byte-exact hashes. The tests
+        patch Path.write_text to LF for their own fixtures, so this guard keeps product code off it."""
+        import re
+        offenders = []
+        for f in sorted((ROOT / "src" / "punk_records").glob("*.py")):
+            for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                if re.search(r"\.write_text\(|open\([^)]*['\"][wa]t?['\"]", line):
+                    offenders.append(f"{f.name}:{n}: {line.strip()}")
+        self.assertEqual(offenders, [])
+
+
 class TestMCP(Base):
     def test_tools(self):
         s = Store(self.tmp / "s")
@@ -227,10 +333,36 @@ class TestMCP(Base):
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
         ]) + "\n"
         out = subprocess.run([sys.executable, "-m", "punk_records", "--home", str(s.root), "mcp"],
-                             input=msgs, capture_output=True, text=True,
+                             input=msgs.encode(), capture_output=True,
                              env={**os.environ, "PYTHONPATH": str(ROOT / "src")}, check=True).stdout
-        replies = [json.loads(x) for x in out.splitlines()]
+        self.assertNotIn(b"\r", out)  # newline-delimited JSON, also on Windows
+        replies = [json.loads(x) for x in out.decode("utf-8").splitlines()]
         self.assertEqual([r["id"] for r in replies], [1, 2])
+
+    def test_stdio_server_is_utf8(self):
+        s = Store(self.tmp / "s")
+        s.init(track_global=False)
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("caf\u00e9\n")
+        sid = s.track(p)
+        s.save()
+        msgs = "\n".join(json.dumps(m, ensure_ascii=False) for m in [
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "append_memory", "arguments": {
+                "satellite": sid, "path": "CLAUDE.md", "text": "- \u2713 na\u00efve \u65e5\u672c"}}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "read_memory", "arguments": {
+                "satellite": sid, "path": "CLAUDE.md"}}},
+        ]) + "\n"
+        env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "PYTHONIOENCODING": "cp1252"}  # a Windows default
+        out = subprocess.run([sys.executable, "-m", "punk_records", "--home", str(s.root), "mcp"],
+                             input=msgs.encode("utf-8"), capture_output=True, env=env, check=True).stdout
+        replies = [json.loads(x) for x in out.decode("utf-8").splitlines()]
+        self.assertEqual(replies[1]["result"]["content"][0]["text"],
+                         "caf\u00e9\n- \u2713 na\u00efve \u65e5\u672c\n")
+        self.assertEqual((p / "CLAUDE.md").read_bytes(), "caf\u00e9\n- \u2713 na\u00efve \u65e5\u672c\n".encode())
+
+
+# Relative link targets use the OS separator, as a user's `ln -s` or `mklink` would; Windows does not
+# resolve "/" in a relative symlink target.
 
 
 def can_symlink():
@@ -268,7 +400,7 @@ class TestSymlinks(Base):
         (self.tmp / "outside.md").write_text("elsewhere\n")
         (p / "docs").mkdir()
         os.symlink("CLAUDE.md", p / "AGENTS.md")
-        os.symlink("../CLAUDE.md", p / "docs" / "GEMINI.md")
+        os.symlink(os.path.join("..", "CLAUDE.md"), p / "docs" / "GEMINI.md")
         os.symlink("README.md", p / "AGENT.md")
         os.symlink(str(self.tmp / "outside.md"), p / "napkin.md")
         os.symlink("missing.md", p / "CLAUDE.local.md")
@@ -288,7 +420,7 @@ class TestSymlinks(Base):
         a, pa, b, pb, sid = self.remote_pair()
         (pa / "sub").mkdir()
         os.symlink("CLAUDE.md", pa / "AGENTS.md")
-        os.symlink("../CLAUDE.md", pa / "sub" / "AGENTS.md")
+        os.symlink(os.path.join("..", "CLAUDE.md"), pa / "sub" / "AGENTS.md")
         acts = a.sync()
         self.assertIn(("add", "AGENTS.md"), [(x.kind, x.rel) for x in acts])
         meta = json.loads((a.root / "satellites" / f"{sid}.json").read_text())
@@ -473,7 +605,7 @@ class TestSymlinks(Base):
         (dot / "CLAUDE.md").write_text("I like short answers\n")
         (dot / "review.md").write_text("review command\n")
         (home / ".claude" / "commands").mkdir(parents=True)
-        os.symlink("../dotfiles/claude/CLAUDE.md", home / ".claude" / "CLAUDE.md")
+        os.symlink(os.path.join("..", "dotfiles", "claude", "CLAUDE.md"), home / ".claude" / "CLAUDE.md")
         os.symlink(str(dot / "review.md"), home / ".claude" / "commands" / "review.md")
         found = scan(home, "global")
         self.assertEqual(found.files, [".claude/CLAUDE.md", ".claude/commands/review.md"])
@@ -506,14 +638,14 @@ class TestSymlinks(Base):
             (home / d).mkdir()
         (home / ".ssh" / "notes.md").write_text("ssh notes\n")
         (home / "bin" / "tool.md").write_text("#!/bin/sh\n")
-        os.chmod(home / "bin" / "tool.md", 0o755)
+        os.chmod(home / "bin" / "tool.md", 0o755)  # no effect on Windows: exec bits come from the extension
         (home / ".bashrc").write_text("export PATH\n")
         (home / "dotfiles" / "data.json").write_text("{}\n")
         (home / ".claude" / "agents").mkdir(parents=True)
         (home / ".gemini").mkdir()
         (self.tmp / "outside.md").write_text("x\n")
         links = {".claude/CLAUDE.md": home / ".ssh" / "notes.md",
-                 ".claude/agents/tool.md": home / "bin" / "tool.md",
+                 **({} if os.name == "nt" else {".claude/agents/tool.md": home / "bin" / "tool.md"}),
                  ".gemini/GEMINI.md": home / ".bashrc",
                  ".claude/agents/data.md": home / "dotfiles" / "data.json",
                  ".codex/AGENTS.md": self.tmp / "outside.md"}
