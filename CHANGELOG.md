@@ -9,3 +9,5 @@ First release.
 - Online sync over any git remote; air-gapped sync with `punk export` / `punk import` bundles
 - Secret scanning (block or `--redact`) before anything enters the store
 - MCP server (`punk mcp`) with context, search, read and append tools
+- Symlinked memories (e.g. `AGENTS.md -> CLAUDE.md`) are recorded as links and recreated on restore; links leaving the project are reported, never followed
+- Global memories symlinked into a dotfiles repo (e.g. `~/.claude/CLAUDE.md -> ~/dotfiles/claude/CLAUDE.md`) are followed: saved by content and restored through the link

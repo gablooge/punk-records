@@ -103,6 +103,15 @@ project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
   add lines to the same `CLAUDE.md`, the result contains both sets of lines.
 - **Deletes propagate on save.** Locally removing a file that was synced removes it from the store.
   Deletions coming *from* the store are only reported, unless you pass `restore --prune`.
+- **Symlinked memories are kept as links.** If `AGENTS.md -> CLAUDE.md`, the content is stored once
+  and the link is recorded in `satellites/<id>.json`, then recreated on other machines. Only links
+  that resolve to a memory file inside the same project are recorded. Links that point outside the
+  project are never followed. `punk scan` and `punk save` warn about them instead.
+- **Dotfiles work.** For global memories, a link such as `~/.claude/CLAUDE.md ->
+  ~/dotfiles/claude/CLAUDE.md` is followed: the content is stored, and restores write through the
+  link into your dotfiles repo. Only non-executable Markdown/text files (or files with the same name
+  as the link) inside `$HOME` are followed, never anything under `.git`, `.ssh`, `.gnupg`, `.aws`
+  and similar.
 
 ## Safety
 
@@ -111,8 +120,9 @@ project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
   file is blocked by default. You can pass `--redact` to store it with secrets replaced, or put
   `punk:allow` on a line to mark a false positive.
 - **Restricted writes.** `restore` only writes paths that match the memory patterns. It never writes
-  into `.git/`, outside the project, or through `..`, so a tampered store or bundle can't plant hooks
-  or scripts in your repos.
+  into `.git/`, outside the project, through `..`, or through an existing symlink. Recreated symlinks
+  must point from one memory path to another inside the project, so a tampered store or bundle can't
+  plant hooks or scripts in your repos.
 - **Keep the remote private.** Memories describe your code and habits. If you need encryption at
   rest on a third-party host, [git-crypt](https://github.com/AGWA/git-crypt) works transparently
   on the store repo.

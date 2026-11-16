@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .discover import discover
+from .discover import discover, scan
 from .store import GLOBAL_ID, PunkError, Store, derive_id
 
 
@@ -70,12 +70,17 @@ def cmd_scan(store: Store, a) -> int:
     root = Path(a.path).expanduser().resolve()
     kind = "global" if a.global_ else "project"
     cfg = store.config() if store.exists() else {}
-    files = discover(Path.home() if a.global_ else root, kind, cfg)
+    found = scan(Path.home() if a.global_ else root, kind, cfg)
     print(f"# {GLOBAL_ID if a.global_ else derive_id(root)}")
-    for f in files:
-        print(f"  {f}")
-    if not files:
+    for f in found.files:
+        via = found.followed.get(f)
+        print(f"  {f}" + (f"  (follows symlink to {via})" if via else ""))
+    for rel, target in found.links.items():
+        print(f"  {rel} -> {target}  (symlink)")
+    if not found.files and not found.links:
         print("  (no memory files found)")
+    for rel, why in found.warnings:
+        print(f"punk: warning: {rel}: {why}", file=sys.stderr)
     return 0
 
 
@@ -148,8 +153,8 @@ def cmd_context(store: Store, a) -> int:
 def cmd_remember(store: Store, a) -> int:
     sid = a.satellite or store.satellite_for(Path.cwd()) or GLOBAL_ID
     text = " ".join(a.text) if a.text else sys.stdin.read()
-    store.append(sid, a.file, text)
-    print(f"remembered in {sid}/{a.file}")
+    written = store.append(sid, a.file, text)
+    print(f"remembered in {sid}/{written}")
     return 0
 
 
