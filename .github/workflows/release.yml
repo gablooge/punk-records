@@ -26,6 +26,11 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    # Waits for a maintainer to approve the deployment. The `pypi` environment must exist with a
+    # required reviewer before the first tag; otherwise GitHub creates it unprotected.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/punk-records/
     permissions:
       id-token: write   # PyPI trusted publishing, no token stored
       contents: write   # create the GitHub release
