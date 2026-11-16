@@ -1,5 +1,6 @@
 # Punk Records
 
+[![CI](https://github.com/gablooge/punk-records/actions/workflows/ci.yml/badge.svg)](https://github.com/gablooge/punk-records/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/punk-records)](https://pypi.org/project/punk-records/)
 [![Python](https://img.shields.io/pypi/pyversions/punk-records)](https://pypi.org/project/punk-records/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/gablooge/punk-records/blob/main/LICENSE)
@@ -24,13 +25,25 @@ uncommitted (`CLAUDE.local.md`, napkins, `~/.claude/CLAUDE.md`). They get lost w
 laptop, they diverge between your work and home machines, and they can't follow you into an
 offline network.
 
+## How it compares
+
+- **Committing `CLAUDE.md` to each repo.** Keep doing it for conventions your team shares. It does not
+  cover the memories you keep out of git on purpose (`CLAUDE.local.md`, napkins, `~/.claude`), notes
+  you would rather not push to a team repo, or a machine that cannot reach the repo host. Punk
+  Records stores those too, alongside the committed ones.
+- **Dotfiles managers** (chezmoi, yadm, GNU Stow). They are built for files at fixed paths in your home
+  directory. Most agent memories live inside project checkouts, at different paths on each machine.
+  Punk Records finds them by itself, matches checkouts by their git remote, merges edits made on two
+  machines, scans for secrets before storing, and serves everything to agents over MCP. The two work
+  together: a global memory that is a symlink into your dotfiles repo is followed (see below).
+
 ## What it picks up
 
 | Scope | Files |
 |---|---|
 | Any project | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENT.md`, `GEMINI.md`, `napkin.md`, `CONVENTIONS.md`, `.cursorrules`, `.windsurfrules`, `.clinerules`, `.goosehints` (anywhere in the tree) |
 | | `.claude/*.md` (napkins, commands, agents), `.claude/skills/*`, `.cursor/rules/*`, `.windsurf/rules/*`, `.clinerules/*`, `.roo/rules/*`, `.kiro/steering/*`, `.github/copilot-instructions.md`, `.github/instructions/*.md` |
-| Global (`$HOME`) | `~/.claude/CLAUDE.md`, `~/.claude/{commands,agents,skills}/*`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` |
+| Global (`$HOME`) | `~/.claude/CLAUDE.md`, `~/.claude/napkin.md`, `~/.claude/{commands,agents,skills}/*`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.config/goose/.goosehints` |
 
 Run `punk scan` to see what would be captured. To add your own patterns, put globs in `punk.json`
 inside the store (`{"include": ["docs/ai/*.md"], "exclude": []}`).
@@ -85,11 +98,15 @@ imports merge the same way online pulls do.
 
 ### Let agents use it live (MCP)
 
+There is no server to keep running. Your agent starts `punk mcp` when a session begins and talks to
+it over stdin/stdout. Run `punk init` once first, then register it:
+
 ```bash
-claude mcp add punk-records -- punk mcp
+claude mcp add --scope user punk-records -- punk mcp   # all projects; without --scope: this project only
 ```
 
-Any MCP client works the same way (`"command": "punk", "args": ["mcp"]`). Tools offered:
+Any MCP client works the same way (`"command": "punk", "args": ["mcp"]`). If the client cannot find
+`punk`, give it the full path from `which punk`. Tools offered:
 `get_context`, `search_memories`, `read_memory`, `list_memories`, `list_satellites`,
 `append_memory` (writes to the store, commits, and updates the local file), and `sync`.
 
@@ -106,7 +123,10 @@ project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
   differs (`-` store, `+` local). You resolve it with `save --force` (local wins) or
   `restore --force` (store wins, and your local copy is kept as `.punk-bak`).
 - **Concurrent appends merge.** Memory files use git's `union` merge driver, so when two machines
-  add lines to the same `CLAUDE.md`, the result contains both sets of lines.
+  add lines to the same `CLAUDE.md`, the result contains both sets of lines. The catch: if both
+  machines change the *same* line, the merged file keeps both versions, one after the other. Nothing
+  is lost, but read the file after such a sync and delete the line you no longer want;
+  `punk git log -p` shows which machine wrote which.
 - **Deletes propagate on save.** Locally removing a file that was synced removes it from the store.
   Deletions coming *from* the store are only reported, unless you pass `restore --prune`.
 - **Symlinked memories are kept as links.** If `AGENTS.md -> CLAUDE.md`, the content is stored once
