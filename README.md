@@ -1,5 +1,9 @@
 # Punk Records
 
+[![PyPI](https://img.shields.io/pypi/v/punk-records)](https://pypi.org/project/punk-records/)
+[![Python](https://img.shields.io/pypi/pyversions/punk-records)](https://pypi.org/project/punk-records/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/gablooge/punk-records/blob/main/LICENSE)
+
 **One brain for all your AI agents.** Persist every `CLAUDE.md`, `AGENTS.md`, napkin, and rules file
 from every project and machine in a single versioned store. Sync it over any git remote, or carry it
 across an air gap on a USB stick. Agents can read and write it live over MCP.
@@ -31,7 +35,7 @@ inside the store (`{"include": ["docs/ai/*.md"], "exclude": []}`).
 Requires Python 3.9+ and git. No other dependencies.
 
 ```bash
-pipx install git+https://github.com/<you>/punk-records
+pipx install punk-records      # or: pip install punk-records
 ```
 
 ## Quickstart

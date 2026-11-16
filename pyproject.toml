@@ -1,25 +1,37 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "punk-records"
-version = "0.1.0"
+dynamic = ["version"]
 description = "One brain for all your AI agents' memories (CLAUDE.md, AGENTS.md, napkins, rules), synced online or air-gapped."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "gablooge" }]
 requires-python = ">=3.9"
 dependencies = []
 keywords = ["ai", "memory", "claude", "agents", "mcp", "cursor", "codex", "sync", "air-gapped"]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
   "Environment :: Console",
   "Topic :: Software Development",
 ]
 
+[project.urls]
+Homepage = "https://github.com/gablooge/punk-records"
+Issues = "https://github.com/gablooge/punk-records/issues"
+Changelog = "https://github.com/gablooge/punk-records/blob/main/CHANGELOG.md"
+
 [project.scripts]
 punk = "punk_records.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "punk_records.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
