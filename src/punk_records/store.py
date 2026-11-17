@@ -22,7 +22,9 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
@@ -93,6 +95,21 @@ def _diff_lines(data: bytes | None) -> list[str]:
 def _eol(data: bytes) -> str:
     crlf = data.count(b"\r\n")
     return "LF" if not crlf else "CRLF" if crlf == data.count(b"\n") else "mixed"
+
+
+def _force_rmtree(path: Path) -> None:
+    """Remove a tree that may hold read-only files: git makes its objects read-only, and Windows will
+    not delete a read-only file (shutil.rmtree with ignore_errors would silently leave it behind)."""
+    def clear_and_retry(func, p, _exc):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+
+    if not path.exists():
+        return
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=clear_and_retry)
+    else:
+        shutil.rmtree(path, onerror=clear_and_retry)
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -313,7 +330,10 @@ class Store:
                 Crypt(self).exchange(push=False)  # bring in what other machines already pushed
             except BaseException:
                 if created:
-                    shutil.rmtree(self.root, ignore_errors=True)  # so `punk init --encrypted` can be re-run
+                    try:
+                        _force_rmtree(self.root)  # so `punk init --encrypted` can simply be run again
+                    except OSError:
+                        pass  # never hide the original error
                 raise
         if track_global:
             self.track(Path.home(), sid=GLOBAL_ID, kind="global")
