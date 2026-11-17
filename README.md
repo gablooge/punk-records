@@ -182,6 +182,9 @@ Any other MCP client works the same way: a stdio server with `"command": "punk"`
 
 ### Things to ask your agent
 
+![Claude Code asking punk records about a repo, then saving a new lesson to it](https://raw.githubusercontent.com/gablooge/punk-records/main/docs/demo-mcp.gif)
+
+
 | You say | The agent uses |
 |---|---|
 | "Before you start, check punk records for what I already know about this repo." | `get_context` |
