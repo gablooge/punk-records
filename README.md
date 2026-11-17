@@ -181,6 +181,14 @@ codex mcp add punk-records -- punk mcp     # or [mcp_servers.punk-records] in ~/
 Any other MCP client works the same way: a stdio server with `"command": "punk"` and
 `"args": ["mcp"]`.
 
+### VS Code
+
+- **Claude Code extension:** nothing extra to do. It shares `~/.claude/settings.json` and the MCP
+  configuration with the CLI, so `punk install-hooks` and
+  `claude mcp add --scope user punk-records -- punk mcp` apply inside VS Code too.
+- **VS Code agent mode (Copilot):** run **MCP: Add Server** from the Command Palette, choose
+  **Command (stdio)** and enter `punk mcp`.
+
 ### Things to ask your agent
 
 ![Claude Code asking punk records about a repo, then saving a new lesson to it](https://raw.githubusercontent.com/gablooge/punk-records/main/docs/demo-mcp.gif)
