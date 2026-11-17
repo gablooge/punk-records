@@ -1295,5 +1295,218 @@ class TestWatch(Base):
         self.assertEqual(self.record(), "offline edit\n")
 
 
+def have_age():
+    import shutil
+    return bool(shutil.which("age") and shutil.which("age-keygen"))
+
+
+@unittest.skipUnless(have_age(), "age is not installed")
+class TestEncryption(Base):
+    def setUp(self):
+        super().setUp()
+        self.remote = self.tmp / "remote.git"
+        git("init", "-q", "--bare", str(self.remote), cwd=self.tmp)
+        self.key_a = self.tmp / "keys" / "a.key"
+        os.environ["PUNK_AGE_KEY"] = str(self.key_a)
+
+    def machine(self, name, key=None, join=False):
+        if key:
+            os.environ["PUNK_AGE_KEY"] = str(key)
+        s = Store(self.tmp / f"{name}-store")
+        if join:
+            s.init(machine=name, track_global=False, encrypted=str(self.remote))
+        else:
+            s.init(machine=name, track_global=False)
+        p = self.project(f"{name}/app")
+        return s, p
+
+    def crypt(self, store):
+        from punk_records.crypt import Crypt
+        return Crypt(store)
+
+    def remote_files(self):
+        r = subprocess.run(["git", "--git-dir", str(self.remote), "ls-tree", "-r", "--name-only", "main"],
+                           capture_output=True, text=True)
+        return r.stdout.split()
+
+    def test_two_machines_share_an_encrypted_remote(self):
+        a, pa = self.machine("a")
+        (pa / "CLAUDE.md").write_text("# rules\n- secret sauce: use tabs\n")
+        sid = a.track(pa)
+        self.crypt(a).setup(str(self.remote))
+        self.assertTrue(self.key_a.is_file())
+        if os.name != "nt":
+            self.assertEqual(self.key_a.stat().st_mode & 0o777, 0o600)
+        a.sync()
+        self.assertEqual(self.remote_files(), ["punk-records.bundle.age"])
+        blob = subprocess.run(["git", "--git-dir", str(self.remote), "cat-file", "blob",
+                               "main:punk-records.bundle.age"], capture_output=True).stdout
+        self.assertTrue(blob.startswith(b"age-encryption.org/v1"))
+        self.assertNotIn(b"secret sauce", blob)
+        self.assertNotIn(b"CLAUDE.md", blob)
+
+        b, pb = self.machine("b", join=True)  # same key file, as if copied
+        b.track(pb)
+        b.sync()
+        self.assertEqual((pb / "CLAUDE.md").read_text(), "# rules\n- secret sauce: use tabs\n")
+
+        # concurrent appends still union-merge (merges happen locally, in plain text)
+        (pa / "CLAUDE.md").write_text((pa / "CLAUDE.md").read_text() + "- from A\n")
+        (pb / "CLAUDE.md").write_text((pb / "CLAUDE.md").read_text() + "- from B\n")
+        a.sync()
+        b.sync()
+        a.sync()
+        for p in (pa, pb):
+            self.assertIn("- from A", (p / "CLAUDE.md").read_text())
+            self.assertIn("- from B", (p / "CLAUDE.md").read_text())
+        count = subprocess.run(["git", "--git-dir", str(self.remote), "rev-list", "--count", "main"],
+                               capture_output=True, text=True).stdout.strip()
+        self.assertEqual(count, "1")  # one encrypted file, replaced on every push; history is inside it
+        self.assertIn(sid, [x for _, x in [(0, s) for s in b.satellites()]])
+
+    def test_lease_protects_a_concurrent_push(self):
+        a, pa = self.machine("a")
+        (pa / "CLAUDE.md").write_text("base\n")
+        a.track(pa)
+        self.crypt(a).setup(str(self.remote))
+        a.sync()
+        b, pb = self.machine("b", join=True)
+        b.track(pb)
+        b.sync()
+        c = self.crypt(a)
+        stale = c.remote_head()
+        (pb / "CLAUDE.md").write_text("base\n- b\n")
+        b.sync()
+        a.save()
+        self.assertFalse(c.push(expected=stale))  # remote moved since `stale`: refused, nothing lost
+        a.sync()
+        self.assertIn("- b", (pa / "CLAUDE.md").read_text())
+
+    def test_a_refused_push_is_merged_and_retried(self):
+        from unittest import mock
+
+        from punk_records.crypt import Crypt
+        a, pa = self.machine("a")
+        (pa / "CLAUDE.md").write_text("base\n")
+        a.track(pa)
+        self.crypt(a).setup(str(self.remote))
+        a.sync()
+        b, pb = self.machine("b", join=True)
+        b.track(pb)
+        b.sync()
+        (pa / "CLAUDE.md").write_text("base\n- from A\n")
+        (pb / "CLAUDE.md").write_text("base\n- from B\n")
+        real_push, raced = Crypt.push, []
+
+        def push(crypt, expected):
+            if crypt.store.root == b.root and not raced:
+                raced.append(True)
+                a.sync()  # A pushes between B's merge and B's push
+            return real_push(crypt, expected)
+
+        with mock.patch.object(Crypt, "push", push):
+            b.sync()
+        self.assertEqual(raced, [True])
+        a.sync()
+        for p in (pa, pb):
+            self.assertIn("- from A", (p / "CLAUDE.md").read_text())
+            self.assertIn("- from B", (p / "CLAUDE.md").read_text())
+
+    def test_plain_remote_is_refused_when_encrypted(self):
+        a, pa = self.machine("a")
+        (pa / "CLAUDE.md").write_text("x\n")
+        a.track(pa)
+        self.crypt(a).setup(str(self.remote))
+        plain = self.tmp / "plain.git"
+        git("init", "-q", "--bare", str(plain), cwd=self.tmp)
+        git("remote", "add", "origin", str(plain), cwd=a.root)
+        with self.assertRaises(PunkError) as e:
+            a.sync()
+        self.assertIn("unencrypted", str(e.exception))
+        self.assertNotEqual(subprocess.run(["git", "--git-dir", str(plain), "rev-parse", "main"],
+                                           capture_output=True).returncode, 0)  # nothing was pushed in plain
+
+    def test_setup_refuses_a_store_with_a_plain_remote(self):
+        a, _ = self.machine("a")
+        git("remote", "add", "origin", str(self.tmp / "plain.git"), cwd=a.root)
+        with self.assertRaises(PunkError):
+            self.crypt(a).setup(str(self.remote))
+
+    def test_wrong_key_and_recipients(self):
+        a, pa = self.machine("a")
+        (pa / "CLAUDE.md").write_text("x\n")
+        a.track(pa)
+        self.crypt(a).setup(str(self.remote))
+        a.sync()
+        key_b = self.tmp / "keys" / "b.key"
+        os.environ["PUNK_AGE_KEY"] = str(key_b)
+        with self.assertRaises(PunkError) as e:
+            self.machine("b", join=True)
+        self.assertIn("add-recipient", str(e.exception))
+        b = Store(self.tmp / "b-store")
+        pub_b = self.crypt(b).public_key()
+        self.assertTrue(pub_b.startswith("age1"))
+        os.environ["PUNK_AGE_KEY"] = str(self.key_a)
+        with self.assertRaises(PunkError):
+            self.crypt(a).add_recipient("age1notarealkey")
+        self.crypt(a).add_recipient(pub_b)
+        a.sync()  # now encrypted to A's and B's keys
+        os.environ["PUNK_AGE_KEY"] = str(key_b)
+        self.assertFalse(b.root.exists())  # the failed join cleaned up after itself
+        b2, pb = self.machine("b", join=True)
+        b2.track(pb)
+        b2.sync()
+        self.assertEqual((pb / "CLAUDE.md").read_text(), "x\n")
+
+    def test_tampered_remote_leaves_the_store_alone(self):
+        a, pa = self.machine("a")
+        (pa / "CLAUDE.md").write_text("x\n")
+        a.track(pa)
+        self.crypt(a).setup(str(self.remote))
+        a.sync()
+        head = a.git("rev-parse", "HEAD").stdout
+        evil = self.tmp / "evil"
+        git("clone", "-q", "-b", "main", str(self.remote), str(evil), cwd=self.tmp)
+        (evil / "punk-records.bundle.age").write_bytes(b"not an age file")
+        git("commit", "-qam", "evil", cwd=evil)
+        git("push", "-q", "origin", "main", cwd=evil)
+        with self.assertRaises(PunkError) as e:
+            a.sync()
+        self.assertIn("decrypt", str(e.exception))
+        self.assertEqual(a.git("rev-parse", "HEAD").stdout, head)
+
+    def test_hooks_use_the_encrypted_remote(self):
+        a, pa = self.machine("a")
+        (pa / "CLAUDE.md").write_text("from a session\n")
+        a.track(pa)
+        self.crypt(a).setup(str(self.remote))
+        from punk_records import hooks
+        code, _, err = hooks.run(a, "session-end", json.dumps({"cwd": str(pa)}))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.remote_files(), ["punk-records.bundle.age"])
+
+    def test_cli(self):
+        from contextlib import redirect_stderr, redirect_stdout
+        from io import StringIO
+
+        def run(*args):
+            out, err = StringIO(), StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                code = cli.main(["--home", str(self.tmp / "cli-store"), *args])
+            return code, out.getvalue(), err.getvalue()
+
+        self.assertEqual(run("init", "--no-global")[0], 0)
+        code, out, _ = run("encrypt", "init", str(self.remote))
+        self.assertEqual(code, 0)
+        self.assertIn("age1", out)
+        self.assertIn(str(self.key_a), out)
+        code, out, _ = run("encrypt", "status")
+        self.assertIn(str(self.remote), out)
+        self.assertIn("age1", out)
+        code, out, _ = run("status")
+        self.assertIn("encrypted", out)
+        self.assertEqual(run("encrypt", "add-recipient", "nope")[0], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

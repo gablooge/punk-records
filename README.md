@@ -88,6 +88,24 @@ Projects get their identity from their git remote (`github.com/you/app`), so the
 at different paths on different machines shares one set of memories. Projects without a remote get
 `local/<dirname>`; you can override it with `punk track --id`.
 
+### Encrypted remote (untrusted host)
+
+If the host should not see your memories at all, let punk encrypt them with [age](https://age-encryption.org)
+(install `age` first; still no Python dependencies):
+
+```bash
+punk encrypt init git@github.com:you/my-punk-records.git   # makes ~/.config/punk/age.key if missing
+punk sync
+```
+
+Your store stays plain text on each machine; the remote only ever holds one file,
+`punk-records.bundle.age`, replaced on every push. On another machine, copy `~/.config/punk/age.key`
+(keep it private and backed up; without it the remote cannot be read) and run
+`punk init --encrypted <url>`. A machine can also keep its own key: run
+`punk encrypt add-recipient <its age1... public key>` on a machine that can already read the remote,
+then sync there. `punk encrypt status` shows the key and recipients. If an encrypted store also has a
+plain git remote, `punk sync` refuses to run rather than push anything unencrypted.
+
 ### Air-gapped sync
 
 ```bash
@@ -178,9 +196,9 @@ project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
   into `.git/`, outside the project, through `..`, or through an existing symlink. Recreated symlinks
   must point from one memory path to another inside the project, so a tampered store or bundle can't
   plant hooks or scripts in your repos.
-- **Keep the remote private.** Memories describe your code and habits. If you need encryption at
-  rest on a third-party host, [git-crypt](https://github.com/AGWA/git-crypt) works transparently
-  on the store repo.
+- **Keep the remote private.** Memories describe your code and habits. On a host you do not trust,
+  use `punk encrypt` (above): the host then sees one age-encrypted file. Encryption hides content but
+  does not prove who wrote it; the restricted-write rules above still apply to anything synced in.
 
 ## Commands
 
@@ -197,6 +215,7 @@ export | import   air-gapped bundle files
 search | show | context | remember
 git ...           run git inside the store
 mcp               MCP server on stdio
+encrypt ...       encrypted remote: init URL | add-recipient KEY | status
 install-hooks     sync automatically when Claude Code sessions start and end
 watch             save automatically when memory files change
 ```

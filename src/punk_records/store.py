@@ -22,7 +22,9 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
@@ -93,6 +95,21 @@ def _diff_lines(data: bytes | None) -> list[str]:
 def _eol(data: bytes) -> str:
     crlf = data.count(b"\r\n")
     return "LF" if not crlf else "CRLF" if crlf == data.count(b"\n") else "mixed"
+
+
+def _force_rmtree(path: Path) -> None:
+    """Remove a tree that may hold read-only files: git makes its objects read-only, and Windows will
+    not delete a read-only file (shutil.rmtree with ignore_errors would silently leave it behind)."""
+    def clear_and_retry(func, p, _exc):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+
+    if not path.exists():
+        return
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=clear_and_retry)
+    else:
+        shutil.rmtree(path, onerror=clear_and_retry)
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -276,9 +293,12 @@ class Store:
 
     # -------------------------------------------------------------- lifecycle
     def init(self, remote: str | None = None, machine: str | None = None,
-             track_global: bool = True) -> None:
+             track_global: bool = True, encrypted: str | None = None) -> None:
         if self.exists():
             raise PunkError(f"a store already exists at {self.root}")
+        if remote and encrypted:
+            raise PunkError("use either a plain remote to clone or --encrypted, not both")
+        created = not self.root.exists()
         if remote:
             self.root.parent.mkdir(parents=True, exist_ok=True)
             r = _git_run(["clone", "-q", "-c", "=".join(GIT_STORE_CONFIG), remote, str(self.root)])
@@ -303,6 +323,18 @@ class Store:
             if not (self.root / name).exists():
                 _write_text(self.root / name, content)
         self.commit(f"init punk records on {state['machine']}")
+        if encrypted:
+            from .crypt import Crypt
+            try:
+                Crypt(self).setup(encrypted)
+                Crypt(self).exchange(push=False)  # bring in what other machines already pushed
+            except BaseException:
+                if created:
+                    try:
+                        _force_rmtree(self.root)  # so `punk init --encrypted` can simply be run again
+                    except OSError:
+                        pass  # never hide the original error
+                raise
         if track_global:
             self.track(Path.home(), sid=GLOBAL_ID, kind="global")
 
@@ -677,6 +709,10 @@ class Store:
 
     def exchange(self, push: bool = True) -> bool:
         """Pull from the git remote (if it has our branch) and push to it. False if there is no remote."""
+        from .crypt import Crypt
+        crypt = Crypt(self)
+        if crypt.enabled:
+            return crypt.exchange(push)
         remote = self.remote()
         if not remote:
             return False
