@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Secret scanning no longer blocks documentation placeholders in `password=...`-style lines
+  (`YOUR_API_KEY`, `EXAMPLE_TOKEN`, `changeme`, `xxxx...`, `SECRET_FROM_VAULT` names); specific key
+  formats are unchanged
+- `punk git --help` (and `-h`) now reach git instead of printing punk's own help
+- `punk track` warns when the folder is your home folder or holds more than 50,000 files
+
 ## 0.3.0 - 2026-11-17
 
 Shared team conventions, and a richer MCP server for agents.

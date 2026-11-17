@@ -9,8 +9,11 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .discover import discover, scan
+from .discover import count_files, discover, scan
 from .store import GLOBAL_ID, PunkError, Store, derive_id
+
+# Above this many files, every save, watch rescan and session hook walks a lot: warn on `punk track`.
+HUGE_FOLDER = 50_000
 
 
 def _report(actions, quiet_ok: str = "nothing to do") -> int:
@@ -49,9 +52,17 @@ def cmd_track(store: Store, a) -> int:
     if a.id and len(paths) > 1:
         raise PunkError("--id works with a single path")
     for p in paths:
-        sid = store.track(Path(p), sid=a.id)
-        n = len(discover(Path(p).resolve(), store._kind(sid), store.config()))
-        print(f"tracking {sid}  <-  {Path(p).resolve()}  ({n} memory file{'' if n == 1 else 's'})")
+        root = Path(p).expanduser().resolve()
+        sid = store.track(root, sid=a.id)
+        n = len(discover(root, store._kind(sid), store.config()))
+        print(f"tracking {sid}  <-  {root}  ({n} memory file{'' if n == 1 else 's'})")
+        if root == Path.home().resolve():
+            print("punk: warning: this is your home folder. Memories in ~/.claude, ~/.codex and ~/.gemini are "
+                  "already the global satellite, and every save would walk your whole home folder. Track "
+                  f"project folders instead (`punk untrack {sid}`, then `punk track ~/code/app`).", file=sys.stderr)
+        elif count_files(root, HUGE_FOLDER) >= HUGE_FOLDER:
+            print(f"punk: warning: {root} has more than {HUGE_FOLDER:,} files; every save, watch rescan and "
+                  "session hook walks all of them. Tracking individual projects is faster.", file=sys.stderr)
     return 0
 
 
@@ -472,10 +483,23 @@ def _utf8_when_piped() -> None:
             reconfigure(encoding="utf-8")
 
 
+def _split_git(argv: list[str]) -> tuple[list[str], list[str] | None]:
+    """Split `punk [--home X] git ARGS...`: argparse would take `git --help` / `git -h` for itself."""
+    i = 0
+    while i < len(argv) and argv[i].startswith("--home"):
+        i += 1 if "=" in argv[i] else 2
+    if i < len(argv) and argv[i] == "git":
+        return argv[:i + 1], argv[i + 1:]
+    return argv, None
+
+
 def main(argv: list[str] | None = None) -> int:
     _utf8_when_piped()
     parser = build_parser()
-    a = parser.parse_args(argv)
+    head, git_args = _split_git(list(sys.argv[1:] if argv is None else argv))
+    a = parser.parse_args(head)
+    if git_args is not None:
+        a.args = git_args
     if not getattr(a, "fn", None):
         parser.print_help()
         return 0

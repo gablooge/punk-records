@@ -216,6 +216,17 @@ def scan(root: Path, kind: str = "project", config: dict | None = None) -> Scan:
     return Scan(sorted(found), dict(sorted(links.items())), sorted(warnings), dict(sorted(followed.items())))
 
 
+def count_files(root: Path, limit: int) -> int:
+    """Files under `root` (skipping PRUNE dirs, like discovery), counting no further than `limit`."""
+    n = 0
+    for _, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in PRUNE]
+        n += len(filenames)
+        if n >= limit:
+            return limit
+    return n
+
+
 def discover(root: Path, kind: str = "project", config: dict | None = None) -> list[str]:
     """Return sorted relative POSIX paths of memory files stored by content under `root`."""
     return scan(root, kind, config)[0]

@@ -18,8 +18,10 @@ PATTERNS = [
     ("google-api-key", r"\bAIza[0-9A-Za-z_\-]{35}"),
     ("stripe-key", r"\b(?:sk|rk)_live_[0-9A-Za-z]{20,}"),
     ("generic-secret", r"(?i)\b(?:api[_-]?key|secret|passw(?:or)?d|access[_-]?token)\b"
-                       r"[\"']?\s*[:=]\s*[\"']?[A-Za-z0-9/+_\-]{16,}"),
+                       r"[\"']?\s*[:=]\s*[\"']?(?P<value>[A-Za-z0-9/+_\-]{16,})"),
 ]
+# Values of a generic `password=...` match that are documentation, not secrets.
+_PLACEHOLDER = re.compile(r"(?i)example|placeholder|your|change-?_?me|dummy|sample|redacted|fake|todo")
 _COMPILED = [(name, re.compile(rx)) for name, rx in PATTERNS]
 
 
@@ -31,6 +33,15 @@ class Hit:
     end: int
 
 
+def _placeholder(value: str) -> bool:
+    """True for values like YOUR_API_KEY, EXAMPLE_TOKEN, changeme-..., xxxxxxxx or an ENV_VAR_NAME."""
+    if _PLACEHOLDER.search(value):
+        return True
+    if "_" in value and re.fullmatch(r"[A-Z0-9_]+", value):
+        return True  # the name of an environment variable or vault entry, not its value
+    return len(set(value.lower())) <= 4  # xxxxxxxx, 00000000, abababab
+
+
 def scan(text: str) -> list[Hit]:
     """Find likely secrets. Lines containing `punk:allow` are ignored."""
     hits: list[Hit] = []
@@ -39,6 +50,8 @@ def scan(text: str) -> list[Hit]:
         for m in rx.finditer(text):
             s, e = m.span()
             if any(s < te and ts < e for ts, te in taken):
+                continue
+            if name == "generic-secret" and _placeholder(m.group("value")):
                 continue
             line_start = text.rfind("\n", 0, s) + 1
             line_end = text.find("\n", s)
