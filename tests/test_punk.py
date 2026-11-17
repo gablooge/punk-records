@@ -1011,5 +1011,113 @@ class TestHooks(Base):
         self.assertEqual((p / "CLAUDE.md").read_text(), "v2\n")
 
 
+class TestDedupe(Base):
+    def setUp(self):
+        super().setUp()
+        self.store = Store(self.tmp / "s")
+        self.store.init(track_global=False)
+        self.p = self.project("app")
+        (self.p / "CLAUDE.md").write_text("x\n")
+        self.sid = self.store.track(self.p)
+        self.store.save()
+
+    def record(self, data: bytes, rel="CLAUDE.md"):
+        (self.store.records / self.sid / rel).write_bytes(data)
+        self.store.commit("union merge")
+        self.store.restore()
+
+    def cli(self, *args):
+        from contextlib import redirect_stderr, redirect_stdout
+        from io import StringIO
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = cli.main(["--home", str(self.store.root), *args])
+        return code, out.getvalue(), err.getvalue()
+
+    def test_dedupe_lines_rules(self):
+        from punk_records.dedupe import dedupe_lines
+        text = ("# rules\n- docker needed\n\n## Notes\n- ci is slow\n- docker needed\n\n"
+                "```python\nx = 1\nx = 1\n```\n```python\nx = 1\n```\n"
+                "## Notes\n---\n---\n| a |\n|---|\n|---|\n  - nested\n  - nested\n- nested\n"
+                "- trailing  \n- trailing\n")
+        out, removed = dedupe_lines(text.encode())
+        self.assertEqual([n for n, _ in removed], [6, 22, 25])
+        self.assertEqual([t for _, t in removed], ["- docker needed", "  - nested", "- trailing"])
+        self.assertEqual(out.decode(), text.replace("- ci is slow\n- docker needed\n", "- ci is slow\n")
+                         .replace("  - nested\n  - nested\n", "  - nested\n")
+                         .replace("- trailing  \n- trailing\n", "- trailing  \n"))
+
+    def test_line_endings_and_final_newline_kept(self):
+        from punk_records.dedupe import dedupe_lines
+        self.assertEqual(dedupe_lines(b"a\r\nb\r\na\r\n")[0], b"a\r\nb\r\n")
+        self.assertEqual(dedupe_lines(b"a\nb\na")[0], b"a\nb\n")
+        self.assertEqual(dedupe_lines(b"a\nb\n"), (b"a\nb\n", []))
+
+    def test_dry_run_by_default(self):
+        self.record(b"- a\n- b\n- a\n")
+        before = self.store.git("rev-parse", "HEAD").stdout
+        code, out, _ = self.cli("dedupe")
+        self.assertEqual(code, 1)  # like `punk diff`: duplicates found
+        self.assertIn(f"{self.sid}/CLAUDE.md:3: - a", out)
+        self.assertIn("--apply", out)
+        self.assertEqual((self.store.records / self.sid / "CLAUDE.md").read_bytes(), b"- a\n- b\n- a\n")
+        self.assertEqual(self.store.git("rev-parse", "HEAD").stdout, before)
+
+    def test_apply_commits_and_restores(self):
+        self.record(b"- a\n- b\n- a\n")
+        code, out, _ = self.cli("dedupe", "--apply")
+        self.assertEqual(code, 0, out)
+        self.assertEqual((self.store.records / self.sid / "CLAUDE.md").read_bytes(), b"- a\n- b\n")
+        self.assertEqual((self.p / "CLAUDE.md").read_bytes(), b"- a\n- b\n")
+        self.assertIn("dedupe", self.store.git("log", "-1", "--format=%s").stdout)
+        self.assertEqual(self.cli("dedupe"), (0, "no duplicate lines\n", ""))
+        self.assertEqual(self.store.save(), [])
+
+    def test_apply_never_clobbers_local_edits(self):
+        self.record(b"- a\n- b\n- a\n")
+        (self.p / "CLAUDE.md").write_bytes(b"- a\n- b\n- a\n- local edit\n")
+        code, out, err = self.cli("dedupe", "--apply")
+        self.assertEqual(code, 1)
+        self.assertIn("conflict", out)
+        self.assertEqual((self.p / "CLAUDE.md").read_bytes(), b"- a\n- b\n- a\n- local edit\n")
+
+    def test_filters(self):
+        self.record(b"- a\n- a\n")
+        (self.store.records / self.sid / "AGENTS.md").write_bytes(b"- z\n- z\n")
+        self.store.commit("more")
+        _, out, _ = self.cli("dedupe", self.sid, "AGENTS.md")
+        self.assertIn("AGENTS.md:2: - z", out)
+        self.assertNotIn("CLAUDE.md", out)
+        self.assertEqual(self.cli("dedupe", "github.com/nope/nope")[0], 2)
+        self.assertEqual(self.cli("dedupe", self.sid, "napkin.md")[0], 2)
+
+    def test_non_utf8_files_are_left_alone(self):
+        (self.store.records / self.sid / "napkin.md").write_bytes(b"caf\xe9\ncaf\xe9\n")
+        self.store.commit("latin-1 file")
+        self.assertEqual(self.cli("dedupe")[1], "no duplicate lines\n")
+        self.assertEqual((self.store.records / self.sid / "napkin.md").read_bytes(), b"caf\xe9\ncaf\xe9\n")
+
+    def test_real_union_merge_duplicate(self):
+        remote = self.tmp / "remote.git"
+        git("init", "-q", "--bare", str(remote), cwd=self.tmp)
+        git("remote", "add", "origin", str(remote), cwd=self.store.root)
+        (self.p / "CLAUDE.md").write_text("# rules\n- tabs\n\n## Notes\n- ci is slow\n")
+        self.store.sync()
+        b = Store(self.tmp / "b-store")
+        b.init(str(remote), machine="b", track_global=False)
+        pb = self.project("b/app")
+        b.track(pb)
+        b.sync()
+        (self.p / "CLAUDE.md").write_text("# rules\n- tabs\n- docker needed\n\n## Notes\n- ci is slow\n")
+        (pb / "CLAUDE.md").write_text("# rules\n- tabs\n\n## Notes\n- ci is slow\n- docker needed\n")
+        self.store.sync()
+        b.sync()
+        self.store.sync()
+        self.assertEqual((self.p / "CLAUDE.md").read_text().count("- docker needed"), 2)
+        self.cli("dedupe", "--apply")
+        self.assertEqual((self.p / "CLAUDE.md").read_text(),
+                         "# rules\n- tabs\n- docker needed\n\n## Notes\n- ci is slow\n")
+
+
 if __name__ == "__main__":
     unittest.main()
