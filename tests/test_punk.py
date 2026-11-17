@@ -889,7 +889,7 @@ class TestHooks(Base):
         code, out, _ = self.cli("install-hooks", "--project", str(p))
         self.assertEqual(code, 0)
         target = p / ".claude" / "settings.local.json"
-        self.assertIn(str(target), out)
+        self.assertIn(str(target.resolve()), out)  # Windows temp dirs can be 8.3 short names (RUNNER~1)
         self.assertIn(".gitignore", out)  # not ignored yet: tell the user
         self.assertEqual(len(self.ours(json.loads(target.read_text()))), 2)
         self.assertFalse(self.settings.exists())
