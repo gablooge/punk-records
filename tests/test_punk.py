@@ -1181,13 +1181,48 @@ class TestWatch(Base):
         self.watcher().start()
         self.assertEqual(self.record(), "offline edit\n")
 
-    def test_new_files_are_noticed(self):
-        w = self.watcher(debounce=0)
+    def test_new_files_are_noticed_at_the_next_rescan(self):
+        from unittest import mock
+        w = self.watcher(debounce=0, rescan=10)
         w.tick(0)
         (self.p / "napkin.md").write_text("new\n")
+        with mock.patch("punk_records.watch.scan", side_effect=AssertionError("walked the tree")):
+            w.tick(1)  # between rescans: only known files are checked, no directory walk
+            w.tick(2)
+        self.assertFalse((self.store.records / self.sid / "napkin.md").exists())
+        w.tick(10)  # full rescan finds it
+        w.tick(11)
+        self.assertEqual((self.store.records / self.sid / "napkin.md").read_text(), "new\n")
+
+    def test_known_files_are_checked_every_look(self):
+        w = self.watcher(debounce=0, rescan=1000)
+        w.tick(0)
+        self.edit("v2\n", 1_000_000_000)
         w.tick(1)
         w.tick(2)
-        self.assertEqual((self.store.records / self.sid / "napkin.md").read_text(), "new\n")
+        self.assertEqual(self.record(), "v2\n")
+        (self.p / "CLAUDE.md").unlink()  # a deleted file is a change too
+        w.tick(3)
+        w.tick(4)
+        self.assertFalse((self.store.records / self.sid / "CLAUDE.md").exists())
+
+    @unittest.skipUnless(can_symlink(), "symlinks not supported here")
+    def test_edits_through_followed_dotfile_links_are_seen(self):
+        home = Path(os.environ["HOME"])
+        (home / "dotfiles").mkdir()
+        (home / "dotfiles" / "CLAUDE.md").write_text("prefs\n")
+        (home / ".claude").mkdir()
+        os.symlink(os.path.join("..", "dotfiles", "CLAUDE.md"), home / ".claude" / "CLAUDE.md")
+        self.store.track(home, sid="global", kind="global")
+        w = self.watcher(debounce=0, rescan=1000)
+        w.tick(0)
+        f = home / "dotfiles" / "CLAUDE.md"
+        f.write_text("prefs\nmore\n")
+        st = f.stat()
+        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+        w.tick(1)
+        w.tick(2)
+        self.assertEqual((self.store.records / "global" / ".claude" / "CLAUDE.md").read_text(), "prefs\nmore\n")
 
     def test_sync_every(self):
         remote = self.tmp / "remote.git"

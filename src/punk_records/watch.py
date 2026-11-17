@@ -1,13 +1,16 @@
 """`punk watch`: save memories automatically when they change (standard library only, by polling).
 
-Every `interval` seconds the watcher fingerprints the memory files of the watched satellites (path,
-size, modification time; symlink targets). After a change it waits until nothing has changed for
-`debounce` seconds, then saves once, so a burst of edits becomes one commit. With `sync_every`, it
+Every `interval` seconds the watcher fingerprints the memory files it knows about (size and
+modification time; the target of symlinks between memory files). That is a few `stat` calls; the full
+directory walk that finds *new* memory files runs only every `rescan` seconds. After a change it waits
+until nothing has changed for `debounce` seconds, then saves once, so a burst of edits becomes one
+commit. With `sync_every`, it
 also runs a full sync (save, pull, push, restore) on that schedule when a remote is set.
 """
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Callable
@@ -18,9 +21,12 @@ from .store import Action, PunkError, Store
 
 class Watcher:
     def __init__(self, store: Store, ids: list[str] | None = None, *, interval: float = 2.0,
-                 debounce: float = 2.0, sync_every: float = 0.0, out: Callable[[str], None] = print):
+                 debounce: float = 2.0, sync_every: float = 0.0, rescan: float = 30.0,
+                 out: Callable[[str], None] = print):
         self.store, self.ids = store, ids or None
-        self.interval, self.debounce, self.sync_every = interval, debounce, sync_every
+        self.interval, self.debounce, self.sync_every, self.rescan = interval, debounce, sync_every, rescan
+        self.known: dict | None = None  # sid -> (root or None, regular/followed files, recorded links)
+        self.last_scan = 0.0
         self.out = out
         self.seen: dict | None = None  # fingerprint at the last save
         self.current: dict | None = None
@@ -32,23 +38,38 @@ class Watcher:
         paths = self.store.load_state()["paths"]
         return [sid for sid in (self.ids or sorted(paths)) if sid in paths]
 
-    def fingerprint(self) -> dict:
-        state, cfg, fp = self.store.load_state(), self.store.config(), {}
+    def _rescan(self) -> None:
+        """Walk the watched projects to learn which memory files exist (new files, new links)."""
+        state, cfg = self.store.load_state(), self.store.config()
+        self.known = {}
         for sid in self.satellites():
             root = Path(state["paths"][sid])
             if not root.is_dir():
-                fp[sid] = None  # gone on this machine; save() reports it
+                self.known[sid] = (None, [], [])  # gone on this machine; save() reports it
                 continue
             found = scan(root, self.store._kind(sid), cfg)
+            self.known[sid] = (root, list(found.files), list(found.links))
+
+    def fingerprint(self, full: bool = True) -> dict:
+        if full or self.known is None:
+            self._rescan()
+        fp = {}
+        for sid, (root, files, links) in self.known.items():
+            if root is None:
+                fp[sid] = None
+                continue
             entries = {}
-            for rel in found.files:
+            for rel in files:  # stat follows symlinks, so edits through followed dotfile links count
                 try:
                     st = (root / rel).stat()
                 except OSError:
-                    continue
+                    continue  # deleted: missing from the fingerprint is a change
                 entries[rel] = (st.st_size, st.st_mtime_ns)
-            for rel, target in found.links.items():
-                entries[rel] = ("link", target)
+            for rel in links:
+                try:
+                    entries[rel] = ("link", os.readlink(root / rel))
+                except OSError:
+                    continue
             fp[sid] = entries
         return fp
 
@@ -83,6 +104,7 @@ class Watcher:
         now = time.monotonic() if now is None else now
         self._save()
         self.seen = self.current = self.fingerprint()
+        self.last_scan = now
         if self.sync_every:
             self.next_sync = now + self.sync_every
 
@@ -90,12 +112,15 @@ class Watcher:
         if self.seen is None:
             self.start(now)
             return
-        fp = self.fingerprint()
+        full = now - self.last_scan >= self.rescan
+        if full:
+            self.last_scan = now
+        fp = self.fingerprint(full)
         if fp != self.current:
             self.current, self.changed_at = fp, now  # still changing: (re)start the quiet period
         if self.changed_at is not None and now - self.changed_at >= self.debounce:
             if self._save():
-                self.seen, self.changed_at = self.fingerprint(), None
+                self.seen, self.changed_at = self.fingerprint(full=False), None
                 self.current = self.seen
             else:
                 self.changed_at = now  # retry after another quiet period

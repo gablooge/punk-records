@@ -8,7 +8,7 @@
   places) and `--apply` keeps only the first copy; blank lines, fenced and indented code, headings
   and lines without letters are never touched
 - `punk watch` saves memory files a moment after they change (polling, no dependencies), with
-  `--interval`, `--debounce` and an optional `--sync-every`
+  `--interval`, `--debounce`, `--rescan` and an optional `--sync-every`
 
 ## 0.1.0 - 2026-11-17
 

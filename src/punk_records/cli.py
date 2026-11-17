@@ -150,7 +150,8 @@ def cmd_watch(store: Store, a) -> int:
     store.require()
     if a.ids:
         store._local_ids(store.load_state(), a.ids)  # unknown ids are an error, not silently ignored
-    w = Watcher(store, a.ids or None, interval=a.interval, debounce=a.debounce, sync_every=a.sync_every)
+    w = Watcher(store, a.ids or None, interval=a.interval, debounce=a.debounce, sync_every=a.sync_every,
+                rescan=a.rescan)
     n = len(w.satellites())
     extra = f", syncing every {a.sync_every:g}s" if a.sync_every and store.remote() else ""
     print(f"watching {n} satellite{'' if n == 1 else 's'} every {a.interval:g}s{extra} (Ctrl+C to stop)")
@@ -328,6 +329,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--interval", type=_interval, default=2.0, metavar="SECONDS", help="how often to look (2)")
     sp.add_argument("--debounce", type=_seconds, default=2.0, metavar="SECONDS",
                     help="save once files have been quiet this long (2)")
+    sp.add_argument("--rescan", type=_seconds, default=30.0, metavar="SECONDS",
+                    help="how often to look for new memory files; known files are checked every look (30)")
     sp.add_argument("--sync-every", type=_seconds, default=0.0, metavar="SECONDS",
                     help="also pull and push on this schedule when a remote is set (off)")
 

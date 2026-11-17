@@ -133,9 +133,9 @@ punk watch                      # save memory files a moment after they change (
 punk watch --sync-every 300     # ...and pull/push every 5 minutes when a remote is set
 ```
 
-`punk watch` looks every 2 seconds (`--interval`) and saves once files have been quiet for 2 seconds
-(`--debounce`), so a burst of edits becomes one commit. It uses no file-system events and no extra
-dependencies: each look rescans the tracked projects, so raise `--interval` for very large trees.
+`punk watch` checks the memory files it knows every 2 seconds (`--interval`) and saves once they have
+been quiet for 2 seconds (`--debounce`), so a burst of edits becomes one commit. New memory files are
+found by a full rescan every 30 seconds (`--rescan`). No file-system events, no extra dependencies.
 
 From the shell: `punk remember "- integration tests need docker running"` appends to the current
 project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
