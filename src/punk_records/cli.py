@@ -127,6 +127,24 @@ def cmd_diff(store: Store, a) -> int:
     return 1 if diffs else 0
 
 
+def cmd_dedupe(store: Store, a) -> int:
+    from . import dedupe
+    found = list(dedupe.find(store, [a.satellite] if a.satellite else None, a.path))
+    if not found:
+        print("no duplicate lines")
+        return 0
+    for sid, rel, _, _, removed in found:
+        for n, text in removed:
+            print(f"{sid}/{rel}:{n}: {text}")
+    lines, files = sum(len(x[4]) for x in found), len(found)
+    summary = f"{lines} duplicate line{'' if lines == 1 else 's'} in {files} file{'' if files == 1 else 's'}"
+    if not a.apply:
+        print(f"\n{summary}; the first copy of each line is kept. Run `punk dedupe --apply` to remove them.")
+        return 1
+    print(f"\nremoved {summary} in the store")
+    return _report(dedupe.apply(store, found), "local copies updated")
+
+
 def cmd_export(store: Store, a) -> int:
     path = store.export_bundle(Path(a.file))
     print(f"wrote {path} ({path.stat().st_size:,} bytes). Carry it over and run `punk import {path.name}`.")
@@ -269,6 +287,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("sync", cmd_sync, "save, pull + push the git remote (if any), restore")
     secret_opts(sp)
+
+    sp = add("dedupe", cmd_dedupe, "remove duplicate lines left by merges (shows them first; exit 1 if any)")
+    sp.add_argument("satellite", nargs="?", help="satellite id (default: all)")
+    sp.add_argument("path", nargs="?", help="one memory file, e.g. CLAUDE.md")
+    sp.add_argument("--apply", action="store_true", help="remove them, commit, and update local copies")
 
     sp = add("export", cmd_export, "write the store to a single bundle file (air-gapped transfer)")
     sp.add_argument("file")

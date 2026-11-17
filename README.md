@@ -142,7 +142,9 @@ project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
   add lines to the same `CLAUDE.md`, the result contains both sets of lines. The catch: if both
   machines change the *same* line, the merged file keeps both versions, one after the other. Nothing
   is lost, but read the file after such a sync and delete the line you no longer want;
-  `punk git log -p` shows which machine wrote which.
+  `punk git log -p` shows which machine wrote which. When two machines add the *same* line in
+  different places, both copies stay; `punk dedupe` lists them and `punk dedupe --apply` keeps only
+  the first (blank lines, code blocks, indented lines and headings are never touched).
 - **Deletes propagate on save.** Locally removing a file that was synced removes it from the store.
   Deletions coming *from* the store are only reported, unless you pass `restore --prune`.
 - **Symlinked memories are kept as links.** If `AGENTS.md -> CLAUDE.md`, the content is stored once
@@ -178,6 +180,7 @@ list | scan       what is tracked / what would be captured
 save | restore    store <-> local projects (--dry-run, --force)
 status            what save/restore would do
 diff [ID] [PATH]  unified diff of local memories vs the store
+dedupe [ID] [PATH] duplicate lines left by merges (--apply removes them)
 sync              save, pull/push remote, restore
 export | import   air-gapped bundle files
 search | show | context | remember
