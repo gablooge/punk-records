@@ -4,6 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/punk-records)](https://pypi.org/project/punk-records/)
 [![Python](https://img.shields.io/pypi/pyversions/punk-records)](https://pypi.org/project/punk-records/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/gablooge/punk-records/blob/main/LICENSE)
+[![Sponsor](https://img.shields.io/badge/Sponsor-gablooge-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/gablooge)
 
 **One brain for all your AI agents.** Persist every `CLAUDE.md`, `AGENTS.md`, napkin, and rules file
 from every project and machine in a single versioned store. Sync it over any git remote, or carry it
@@ -329,5 +330,11 @@ python -m unittest discover -s tests -v
 See [CONTRIBUTING.md](https://github.com/gablooge/punk-records/blob/main/CONTRIBUTING.md) for the rules (no runtime dependencies, Python 3.9 syntax,
 tests for every change). Report security problems privately as described in
 [SECURITY.md](https://github.com/gablooge/punk-records/blob/main/SECURITY.md).
+
+## Support
+
+If Punk Records saves you from losing what your agents learned, you can support its development:
+
+[![Sponsor gablooge on GitHub](https://img.shields.io/badge/Sponsor-gablooge-ea4aaa?logo=githubsponsors&logoColor=white&style=for-the-badge)](https://github.com/sponsors/gablooge)
 
 MIT licensed.
