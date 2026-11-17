@@ -727,6 +727,9 @@ class Store:
         """save -> pull -> push -> restore. Works offline: it just saves and restores."""
         actions = self.save(ids, **save_kw)
         self.exchange()
+        from .team import Team
+        for name, error in Team(self).update():  # read-only subscriptions; never block your own sync
+            actions.append(Action("skipped", f"@{name}", note=f"could not update: {error}"))
         return actions + self.restore(ids)
 
     def export_bundle(self, path: Path) -> Path:
@@ -807,22 +810,49 @@ class Store:
         return target.read_text("utf-8", "replace")
 
     def search(self, query: str, regex: bool = False, sid: str | None = None):
+        """Matching lines in your memories, then in subscribed team stores (labelled `@name/<sid>`)."""
         rx = re.compile(query if regex else re.escape(query), re.IGNORECASE)
         for s, rel in self.memories(sid):
             for n, line in enumerate(self.read(s, rel).splitlines(), 1):
                 if rx.search(line):
                     yield s, rel, n, line
+        from .team import Team
+        team = Team(self)
+        for label, tsid, rel in team.search_files():
+            if sid and tsid != sid:
+                continue
+            try:
+                text = team.read(label.split("/", 1)[0][1:], tsid, rel)
+            except PunkError:
+                continue
+            for n, line in enumerate(text.splitlines(), 1):
+                if rx.search(line):
+                    yield label, rel, n, line
 
     def context(self, path: Path) -> str:
-        """Everything an agent should know when working in `path`, as one document."""
-        parts = []
-        sids = [GLOBAL_ID] if GLOBAL_ID in self.satellites() else []
-        project = self.satellite_for(path)
+        """Everything an agent should know when working in `path`, as one document.
+
+        Order: subscribed team rules, your global memories, team notes for this project, your project
+        memories. Your own notes come after the team's, so they read as the final word.
+        """
+        from .team import Team, project_id
+        team, parts = Team(self), []
+
+        def mine(sid: str) -> None:
+            if sid in self.satellites():
+                for _, rel in self.memories(sid):
+                    parts.append(f"<!-- punk-records: {sid}/{rel} -->\n{self.read(sid, rel).rstrip()}\n")
+
+        def theirs(sid: str) -> None:
+            for label, where, text in team.sections([sid]):
+                parts.append(f"<!-- punk-records: {label}/{where} (read-only, from {label[1:]}) -->\n{text.rstrip()}\n")
+
+        theirs(GLOBAL_ID)
+        mine(GLOBAL_ID)
+        project = project_id(self, path) if team.names() else self.satellite_for(path)
         if project:
-            sids.append(project)
-        for sid in sids:
-            for _, rel in self.memories(sid):
-                parts.append(f"<!-- punk-records: {sid}/{rel} -->\n{self.read(sid, rel).rstrip()}\n")
+            theirs(project)
+            mine(project)
         return "\n".join(parts)
 
     def _write_target(self, sid: str, rel: str) -> tuple[str, Path, str | None]:

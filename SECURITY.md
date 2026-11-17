@@ -40,6 +40,10 @@ These guarantees must always hold. Breaking any of them is a vulnerability:
    is pushed, to this machine's own key and recipients added on this machine (recipients are never
    synced, so a hostile remote cannot add its own key). If a plain git remote is also configured,
    sync refuses to run.
+8. **Subscriptions stay read-only and local.** A subscribed store is kept as a bare clone and read
+   from git objects only: nothing from it is checked out, written into projects or your store, or
+   pushed. Symlink entries are ignored, oversized files skipped, and `ext::`/`fd::` URLs refused. The
+   list of subscriptions is per machine and never synced.
 
 ## Out of scope
 

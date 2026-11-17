@@ -106,6 +106,24 @@ Your store stays plain text on each machine; the remote only ever holds one file
 then sync there. `punk encrypt status` shows the key and recipients. If an encrypted store also has a
 plain git remote, `punk sync` refuses to run rather than push anything unencrypted.
 
+### Team brain (read-only)
+
+Read another Punk Records store too, for example your team's shared conventions:
+
+```bash
+punk subscribe acme git@github.com:acme/team-punk-records.git
+punk subscriptions               # what you read, and when it was last updated
+punk unsubscribe acme
+```
+
+For any project, `punk context` (and the MCP `get_context` tool and `punk-context` prompt) then shows the
+team's general rules, your global memories, the team's notes for that repo (matched by its git
+remote, even if you don't track it), and your project memories last, so your own notes have the final
+word. `punk search` labels team hits `@acme/...`. Subscriptions are read-only: nothing from them is
+written into your projects or your store, or pushed anywhere. `punk sync` and the Claude Code
+session-start hook fetch them, and an unreachable one never blocks your own sync. Subscriptions are
+per machine; run `punk subscribe` on each machine that should read them.
+
 ### Air-gapped sync
 
 ```bash
@@ -286,6 +304,7 @@ search | show | context | remember
 git ...           run git inside the store
 mcp               MCP server on stdio
 encrypt ...       encrypted remote: init URL | add-recipient KEY | status
+subscribe NAME URL  read another store read-only (unsubscribe NAME, subscriptions)
 install-hooks     sync automatically when Claude Code sessions start and end
 watch             save automatically when memory files change
 ```

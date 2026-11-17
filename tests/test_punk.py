@@ -1674,5 +1674,143 @@ class TestMCPProtocol(Base):
         self.assertFalse(r["isError"])
 
 
+class TestTeamBrain(Base):
+    def setUp(self):
+        super().setUp()
+        # the team's store: org-wide rules plus notes for the same app
+        self.team = Store(self.tmp / "team-store")
+        self.team.init(machine="team", track_global=False)
+        for sid, rel, text in (("global", ".claude/CLAUDE.md", "- team: write tests first\n"),
+                               ("github.com/me/app", "CLAUDE.md", "- team: deploy with make ship\n")):
+            f = self.team.records / sid / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(text)
+        sat = self.team.root / "satellites" / "github.com" / "me"
+        sat.mkdir(parents=True)
+        (sat / "app.json").write_text('{"name": "app", "kind": "project"}\n')  # as `punk track` writes it
+        self.team.commit("team conventions")
+        # my store and project
+        self.store = Store(self.tmp / "s")
+        self.store.init(track_global=False)
+        self.p = self.project("app")
+        (self.p / "CLAUDE.md").write_text("- me: tabs\n")
+        self.sid = self.store.track(self.p)
+        self.store.save()
+
+    def team_brain(self):
+        from punk_records.team import Team
+        return Team(self.store)
+
+    def test_context_includes_team_memories_read_only(self):
+        self.team_brain().subscribe("acme", str(self.team.root))
+        before = self.store.git("rev-parse", "HEAD").stdout
+        ctx = self.store.context(self.p)
+        order = [ctx.index(x) for x in ("- team: write tests first", "- team: deploy with make ship", "- me: tabs")]
+        self.assertEqual(order, sorted(order))  # team general, then team project notes, then mine last
+        self.assertLess(ctx.index("- team: deploy with make ship"), ctx.index("- me: tabs"))
+        self.assertIn("@acme/github.com/me/app/CLAUDE.md", ctx)
+        self.assertIn("read-only", ctx)
+        # never written anywhere: not into my records, not into the project, no commit
+        self.assertEqual(self.store.git("rev-parse", "HEAD").stdout, before)
+        self.assertFalse((self.store.records / "global").exists())
+        self.assertEqual(self.store.restore(), [])
+        self.assertEqual((self.p / "CLAUDE.md").read_text(), "- me: tabs\n")
+        self.assertEqual(self.store.save(), [])
+
+    def test_team_notes_apply_to_projects_you_do_not_track(self):
+        self.team_brain().subscribe("acme", str(self.team.root))
+        self.store.untrack(self.sid, purge=True)
+        ctx = self.store.context(self.p)  # matched by the checkout's git remote
+        self.assertIn("- team: deploy with make ship", ctx)
+        self.assertNotIn("- me: tabs", ctx)
+
+    def test_search_labels_team_hits(self):
+        self.team_brain().subscribe("acme", str(self.team.root))
+        hits = [(s, r) for s, r, _, _ in self.store.search("make ship")]
+        self.assertEqual(hits, [("@acme/github.com/me/app", "CLAUDE.md")])
+
+    def test_sync_updates_subscriptions(self):
+        self.team_brain().subscribe("acme", str(self.team.root))
+        f = self.team.records / "global" / ".claude" / "CLAUDE.md"
+        f.write_text(f.read_text() + "- team: no force pushes\n")
+        self.team.commit("new rule")
+        self.assertNotIn("no force pushes", self.store.context(self.p))
+        self.store.sync()
+        self.assertIn("no force pushes", self.store.context(self.p))
+
+    def test_unreachable_subscription_never_blocks_sync(self):
+        self.team_brain().subscribe("acme", str(self.team.root))
+        import shutil
+        shutil.move(str(self.team.root), str(self.tmp / "moved"))
+        (self.p / "CLAUDE.md").write_text("- me: tabs\n- me: more\n")
+        acts = self.store.sync()
+        self.assertIn(("update", "CLAUDE.md"), [(a.kind, a.rel) for a in acts])
+        self.assertTrue(any(a.sat == "@acme" and a.kind == "skipped" for a in acts), acts)
+        self.assertIn("- team: write tests first", self.store.context(self.p))  # last fetched copy still used
+
+    def test_subscribe_validation(self):
+        t = self.team_brain()
+        for name, url in (("acme", "ext::sh -c touch% /tmp/pwned"), ("acme", "fd::7"),
+                          ("Bad Name", str(self.team.root)), ("../x", str(self.team.root))):
+            with self.assertRaises(PunkError, msg=(name, url)):
+                t.subscribe(name, url)
+        plain = self.tmp / "plain"
+        plain.mkdir()
+        git("init", "-q", str(plain), cwd=self.tmp)
+        (plain / "README.md").write_text("x")
+        git("add", "-A", cwd=plain)
+        git("commit", "-qm", "x", cwd=plain)
+        with self.assertRaises(PunkError) as e:
+            t.subscribe("plain", str(plain))
+        self.assertIn("not a Punk Records store", str(e.exception))
+        self.assertEqual(t.names(), [])
+        t.subscribe("acme", str(self.team.root))
+        with self.assertRaises(PunkError):
+            t.subscribe("acme", str(self.team.root))
+        t.unsubscribe("acme")
+        self.assertEqual(t.names(), [])
+        self.assertNotIn("team:", self.store.context(self.p))
+
+    @unittest.skipUnless(can_symlink(), "symlinks not supported here")
+    def test_hostile_team_store_cannot_reach_outside(self):
+        (self.tmp / "secret.txt").write_text("my private key\n")
+        os.symlink(str(self.tmp / "secret.txt"), self.team.records / "global" / "CLAUDE.md")
+        big = self.team.records / "global" / "AGENTS.md"
+        big.write_text("x" * 2_000_000)
+        self.team.commit("hostile")
+        self.team_brain().subscribe("acme", str(self.team.root))
+        ctx = self.store.context(self.p)
+        self.assertNotIn("my private key", ctx)  # symlink entries are ignored, never followed
+        self.assertNotIn(str(self.tmp / "secret.txt"), ctx)  # not even the link's target path
+        self.assertNotIn("x" * 1000, ctx)  # oversized files skipped
+        self.assertFalse(any(self.store.records.rglob("*secret*")))
+
+    def test_mcp_and_cli(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        out = StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(cli.main(["--home", str(self.store.root), "subscribe", "acme", str(self.team.root)]), 0)
+            self.assertEqual(cli.main(["--home", str(self.store.root), "subscriptions"]), 0)
+        self.assertIn("acme", out.getvalue())
+        self.assertIn(str(self.team.root), out.getvalue())
+        r = handle(self.store, {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                "params": {"name": "get_context", "arguments": {"cwd": str(self.p)}}})
+        self.assertIn("make ship", r["result"]["content"][0]["text"])
+        with redirect_stdout(StringIO()):
+            self.assertEqual(cli.main(["--home", str(self.store.root), "unsubscribe", "acme"]), 0)
+        self.assertEqual(cli.main(["--home", str(self.store.root), "unsubscribe", "acme"]), 2)
+
+    def test_session_start_hook_updates_subscriptions(self):
+        from punk_records import hooks
+        self.team_brain().subscribe("acme", str(self.team.root))
+        f = self.team.records / "global" / ".claude" / "CLAUDE.md"
+        f.write_text(f.read_text() + "- team: hook fetched this\n")
+        self.team.commit("new")
+        code, out, _ = hooks.run(self.store, "session-start", json.dumps({"cwd": str(self.p)}))
+        self.assertEqual((code, out), (0, ""))
+        self.assertIn("hook fetched this", self.store.context(self.p))
+
+
 if __name__ == "__main__":
     unittest.main()

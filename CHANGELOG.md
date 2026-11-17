@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Team brain: `punk subscribe NAME URL` reads another Punk Records store read-only; its memories
+  show up in `punk context`, `punk search` and the MCP context/search tools (labelled `@NAME`), are
+  refreshed by `punk sync` and the session-start hook, and are never written back
 - **Changed:** the MCP `sync` tool is off by default because it reaches the network; register the
   server as `punk mcp --allow-sync` to offer it
 - MCP `write_memory` replaces a memory file with conflict checks: it needs the sha256 that
