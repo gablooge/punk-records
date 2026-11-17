@@ -5,8 +5,8 @@
 - `punk install-hooks` adds Claude Code hooks that restore memories when a session starts and save
   and sync them when it ends; `--project` for one project, `--uninstall` to remove them
 - `punk dedupe [ID] [PATH]` lists duplicate lines left by union merges (the same line added in two
-  places) and `--apply` keeps only the first copy; blank lines, fenced code, headings and lines
-  without letters are never touched
+  places) and `--apply` keeps only the first copy; blank lines, fenced and indented code, headings
+  and lines without letters are never touched
 
 ## 0.1.0 - 2026-11-17
 

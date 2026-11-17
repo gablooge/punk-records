@@ -1047,6 +1047,21 @@ class TestDedupe(Base):
                          .replace("  - nested\n  - nested\n", "  - nested\n")
                          .replace("- trailing  \n- trailing\n", "- trailing  \n"))
 
+    def test_code_blocks_are_never_touched(self):
+        from punk_records.dedupe import dedupe_lines
+        cases = {
+            # a ~~~ block showing a ``` fence: the inner line must not close it
+            b"~~~\n```\nx = 1\nx = 1\n```\n~~~\n- a\n- a\n": [(8, "- a")],
+            # a longer fence is closed only by an equal or longer fence of the same kind
+            b"````\n```\nfoo\nfoo\n```\n````\n- b\n- b\n": [(8, "- b")],
+            # a fence line with text after it does not close the block
+            b"```\n``` not a close\ny\ny\n```\n- c\n- c\n": [(7, "- c")],
+            # indented (4 spaces or tab) code
+            b"Example:\n\n    make test\n    make test\n\tgo\n\tgo\n- d\n- d\n": [(8, "- d")],
+        }
+        for data, expected in cases.items():
+            self.assertEqual(dedupe_lines(data)[1], expected, data)
+
     def test_line_endings_and_final_newline_kept(self):
         from punk_records.dedupe import dedupe_lines
         self.assertEqual(dedupe_lines(b"a\r\nb\r\na\r\n")[0], b"a\r\nb\r\n")

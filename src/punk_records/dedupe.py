@@ -2,7 +2,8 @@
 
 When two machines add the same line in different places, git's union merge keeps both copies. This
 keeps the first copy of each line and drops the later ones, except lines that legitimately repeat:
-blank lines, fenced code (and the fences), Markdown headings, and lines without letters or digits
+blank lines, fenced code (and the fences, matched as CommonMark does), lines indented 4+ spaces or a
+tab (indented code, or deeply nested lists), Markdown headings, and lines without letters or digits
 (`---`, table separators, closing tags). Lines match exactly, indentation included; only trailing
 whitespace is ignored. Line endings and the rest of the bytes are kept as they are.
 """
@@ -13,7 +14,7 @@ import re
 
 from .store import PunkError, Store, _safe_target
 
-_FENCE = re.compile(r"^\s*(```|~~~)")
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 _HEADING = re.compile(r"^\s{0,3}#{1,6}(\s|$)")
 _WORDY = re.compile(r"\w")
 
@@ -24,14 +25,22 @@ def dedupe_lines(data: bytes) -> tuple[bytes, list[tuple[int, str]]]:
     seen: set[str] = set()
     kept: list[str] = []
     removed: list[tuple[int, str]] = []
-    in_fence = False
+    fence = ""  # the fence that opened the current code block, e.g. "```" or "~~~~"
     for n, raw in enumerate(lines, 1):
         text = raw.rstrip()
-        if _FENCE.match(text):
-            in_fence = not in_fence
+        m = _FENCE.match(text)
+        if fence:
+            # CommonMark: only the same character, at least as long, with nothing after it, closes
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
+                fence = ""
             kept.append(raw)
             continue
-        if in_fence or not text or _HEADING.match(text) or not _WORDY.search(text):
+        if m:
+            fence = m.group(1)
+            kept.append(raw)
+            continue
+        indented_code = raw.startswith(("    ", "\t"))  # or a deeply nested list: leave both alone
+        if indented_code or not text or _HEADING.match(text) or not _WORDY.search(text):
             kept.append(raw)
             continue
         if text in seen:
