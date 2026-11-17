@@ -31,9 +31,12 @@ def _report(actions, quiet_ok: str = "nothing to do") -> int:
 
 
 def cmd_init(store: Store, a) -> int:
-    store.init(remote=a.remote, machine=a.machine, track_global=not a.no_global)
+    store.init(remote=a.remote, machine=a.machine, track_global=not a.no_global, encrypted=a.encrypted)
     print(f"Punk Records ready at {store.root}")
-    if a.remote:
+    if a.encrypted:
+        print(f"Joined the encrypted remote {a.encrypted}. Track your projects with `punk track <dir>`, "
+              f"then `punk sync`.")
+    elif a.remote:
         print("Cloned from remote. Track your projects with `punk track <dir>`, then `punk sync`.")
     else:
         print("Next: `punk track <project-dir>` and `punk save`. Add a private git remote with\n"
@@ -109,8 +112,43 @@ def cmd_status(store: Store, a) -> int:
     print("\nStore changes `punk restore` would write here:")
     r = store.restore(dry_run=True)
     _report(r, "  none")
-    remote = store.remote()
+    from .crypt import Crypt
+    crypt = Crypt(store)
+    remote = f"encrypted, {crypt.url()}" if crypt.enabled else store.remote()
     print(f"\nremote: {remote or '(none - offline / air-gapped mode)'}")
+    return 0
+
+
+def cmd_encrypt(store: Store, a) -> int:
+    from .crypt import Crypt, key_path
+    store.require()
+    crypt = Crypt(store)
+    if a.action == "init":
+        if not a.value:
+            raise PunkError("usage: punk encrypt init <git-url>")
+        new_key = not key_path().exists()
+        crypt.setup(a.value)
+        print(f"encrypted remote: {a.value}")
+        print(f"age key: {key_path()}{' (new)' if new_key else ''}  (keep it private; back it up)")
+        print(f"public key: {crypt.public_key()}")
+        print("Run `punk sync` to push. On another machine: copy the key file to the same path, then\n"
+              f"  punk init --encrypted {a.value}\n"
+              "or let it use its own key: run `punk encrypt add-recipient <its public key>` here and sync.")
+        return 0
+    if a.action == "add-recipient":
+        if not crypt.enabled:
+            raise PunkError("no encrypted remote here; run `punk encrypt init <git-url>` first")
+        crypt.add_recipient(a.value or "")
+        print("added; the next `punk sync` encrypts to it as well")
+        return 0
+    if not crypt.enabled:
+        print("no encrypted remote (see `punk encrypt init`)")
+        return 0
+    print(f"encrypted remote: {crypt.url()}")
+    print(f"age key: {key_path()}")
+    print("recipients:")
+    for r in crypt.recipients():
+        print(f"  {r}")
     return 0
 
 
@@ -280,6 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("init", cmd_init, "create a store, or clone one from a git remote")
     sp.add_argument("remote", nargs="?", help="git URL or path of an existing store to clone")
+    sp.add_argument("--encrypted", metavar="URL", help="join an encrypted remote (see `punk encrypt`)")
     sp.add_argument("--machine", help="name for this machine (default: hostname)")
     sp.add_argument("--no-global", action="store_true", help="don't track ~/.claude, ~/.codex, ...")
 
@@ -333,6 +372,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="how often to look for new memory files; known files are checked every look (30)")
     sp.add_argument("--sync-every", type=_seconds, default=0.0, metavar="SECONDS",
                     help="also pull and push on this schedule when a remote is set (off)")
+
+    sp = add("encrypt", cmd_encrypt, "sync through a remote that only sees an age-encrypted file")
+    sp.add_argument("action", choices=["init", "add-recipient", "status"])
+    sp.add_argument("value", nargs="?", help="init: the git URL; add-recipient: an age1... public key")
 
     sp = add("export", cmd_export, "write the store to a single bundle file (air-gapped transfer)")
     sp.add_argument("file")

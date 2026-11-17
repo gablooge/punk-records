@@ -36,11 +36,18 @@ These guarantees must always hold. Breaking any of them is a vulnerability:
    copies are kept until the user chooses, and `--force` keeps a `.punk-bak` backup.
 6. **`punk diff` and reads stay inside memory paths.** A tampered store must not make punk print
    arbitrary local files.
+7. **Encrypted remotes never receive plain text.** With `punk encrypt`, only an age-encrypted bundle
+   is pushed, to this machine's own key and recipients added on this machine (recipients are never
+   synced, so a hostile remote cannot add its own key). If a plain git remote is also configured,
+   sync refuses to run.
 
 ## Out of scope
 
-- Who can read your git remote. Keep it private; for third-party hosts, consider encrypting the
-  store with [git-crypt](https://github.com/AGWA/git-crypt).
+- Who can read your git remote, unless you use `punk encrypt`. Encryption provides confidentiality,
+  not authenticity: a hostile remote can upload a bundle encrypted to your public key; item 1 limits
+  what it can write.
+- Losing your age key. Without it the encrypted remote cannot be read; your local stores are
+  unaffected.
 - Secret formats the scanner does not know. Detection is best effort; please open a normal issue
   with a (fake) example so a pattern can be added.
 - Anything that requires write access to your machine or your store's `.git` directory already.

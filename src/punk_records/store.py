@@ -276,9 +276,12 @@ class Store:
 
     # -------------------------------------------------------------- lifecycle
     def init(self, remote: str | None = None, machine: str | None = None,
-             track_global: bool = True) -> None:
+             track_global: bool = True, encrypted: str | None = None) -> None:
         if self.exists():
             raise PunkError(f"a store already exists at {self.root}")
+        if remote and encrypted:
+            raise PunkError("use either a plain remote to clone or --encrypted, not both")
+        created = not self.root.exists()
         if remote:
             self.root.parent.mkdir(parents=True, exist_ok=True)
             r = _git_run(["clone", "-q", "-c", "=".join(GIT_STORE_CONFIG), remote, str(self.root)])
@@ -303,6 +306,15 @@ class Store:
             if not (self.root / name).exists():
                 _write_text(self.root / name, content)
         self.commit(f"init punk records on {state['machine']}")
+        if encrypted:
+            from .crypt import Crypt
+            try:
+                Crypt(self).setup(encrypted)
+                Crypt(self).exchange(push=False)  # bring in what other machines already pushed
+            except BaseException:
+                if created:
+                    shutil.rmtree(self.root, ignore_errors=True)  # so `punk init --encrypted` can be re-run
+                raise
         if track_global:
             self.track(Path.home(), sid=GLOBAL_ID, kind="global")
 
@@ -677,6 +689,10 @@ class Store:
 
     def exchange(self, push: bool = True) -> bool:
         """Pull from the git remote (if it has our branch) and push to it. False if there is no remote."""
+        from .crypt import Crypt
+        crypt = Crypt(self)
+        if crypt.enabled:
+            return crypt.exchange(push)
         remote = self.remote()
         if not remote:
             return False

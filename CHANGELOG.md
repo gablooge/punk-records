@@ -7,6 +7,9 @@
 - `punk dedupe [ID] [PATH]` lists duplicate lines left by union merges (the same line added in two
   places) and `--apply` keeps only the first copy; blank lines, fenced and indented code, headings
   and lines without letters are never touched
+- `punk encrypt init <url>` syncs through a remote that only ever holds one age-encrypted bundle;
+  stores stay plain text locally, merges happen locally, `punk init --encrypted <url>` joins from
+  another machine, `punk encrypt add-recipient` adds another machine's own key
 - `punk watch` saves memory files a moment after they change (polling, no dependencies), with
   `--interval`, `--debounce`, `--rescan` and an optional `--sync-every`
 
