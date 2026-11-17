@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-11-17
+
+Shared team conventions, and a richer MCP server for agents.
 
 - Team brain: `punk subscribe NAME URL` reads another Punk Records store read-only; its memories
   show up in `punk context`, `punk search` and the MCP context/search tools (labelled `@NAME`), are
