@@ -4,10 +4,10 @@
 
 - `punk status --json` and `punk list --json` (satellites, local paths, memory files, team
   subscriptions) for editor integrations; the JSON carries `"version": 1`
-- `punk show @team/<satellite> <path>` prints a memory from a subscribed team store
 - Claude Code auto memory (`~/.claude/projects/<project>/memory/*.md`) is saved with its project as
   `@claude-memory/...` and restored into the right folder on every machine, whatever the checkout
   path; worktrees share the main checkout's. Opt out with `"exclude": ["@claude-memory/*"]`
+- `punk show @team/<satellite> <path>` prints a memory from a subscribed team store
 
 ## 0.3.1 - 2026-11-17
 
