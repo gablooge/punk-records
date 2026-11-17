@@ -1885,5 +1885,72 @@ class TestRoughEdges(Base):
         self.assertIn("home folder", err)
 
 
+class TestJsonOutput(Base):
+    """Machine-readable output for editor integrations (the VS Code extension)."""
+
+    def setUp(self):
+        super().setUp()
+        self.store = Store(self.tmp / "s")
+        self.store.init(track_global=False)
+        self.p = self.project("app")
+        (self.p / "CLAUDE.md").write_text("v1\n")
+        self.sid = self.store.track(self.p)
+        self.store.save()
+
+    def run_cli(self, *args):
+        from contextlib import redirect_stderr, redirect_stdout
+        from io import StringIO
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = cli.main(["--home", str(self.store.root), *args])
+        return code, out.getvalue(), err.getvalue()
+
+    def test_status_json(self):
+        code, out, _ = self.run_cli("status", "--json")
+        self.assertEqual(code, 0)
+        data = json.loads(out)
+        self.assertEqual(data["version"], 1)
+        self.assertEqual((data["save"], data["restore"], data["remote"]), ([], [], None))
+        (self.p / "CLAUDE.md").write_text("v2\n")
+        (self.store.records / self.sid / "napkin.md").write_text("from elsewhere\n")
+        self.store.commit("other machine")
+        data = json.loads(self.run_cli("status", "--json")[1])
+        self.assertEqual(data["save"], [{"kind": "update", "satellite": self.sid, "path": "CLAUDE.md", "note": ""}])
+        self.assertEqual(data["restore"], [{"kind": "add", "satellite": self.sid, "path": "napkin.md", "note": ""}])
+        remote = self.tmp / "remote.git"
+        git("init", "-q", "--bare", str(remote), cwd=self.tmp)
+        git("remote", "add", "origin", str(remote), cwd=self.store.root)
+        self.assertEqual(json.loads(self.run_cli("status", "--json")[1])["remote"],
+                         {"kind": "git", "url": str(remote)})
+
+    def test_list_json(self):
+        team = Store(self.tmp / "team")
+        team.init(machine="team", track_global=False)
+        (team.records / "global").mkdir(parents=True)
+        (team.records / "global" / "CLAUDE.md").write_text("- team rule\n")
+        team.commit("team")
+        from punk_records.team import Team
+        Team(self.store).subscribe("acme", str(team.root))
+        code, out, _ = self.run_cli("list", "--json")
+        self.assertEqual(code, 0)
+        data = json.loads(out)
+        self.assertEqual(data["version"], 1)
+        self.assertEqual(data["satellites"], [{"id": self.sid, "kind": "project", "name": "app",
+                                               "local_path": str(self.p.resolve()), "memories": ["CLAUDE.md"]}])
+        self.assertEqual(data["subscriptions"], [{"name": "acme", "url": str(team.root),
+                                                  "satellites": [{"id": "global", "memories": ["CLAUDE.md"]}]}])
+
+    def test_show_reads_team_memories(self):
+        team = Store(self.tmp / "team")
+        team.init(machine="team", track_global=False)
+        (team.records / "global").mkdir(parents=True)
+        (team.records / "global" / "CLAUDE.md").write_text("- team rule\n")
+        team.commit("team")
+        from punk_records.team import Team
+        Team(self.store).subscribe("acme", str(team.root))
+        self.assertEqual(self.run_cli("show", "@acme/global", "CLAUDE.md")[:2], (0, "- team rule\n"))
+        self.assertEqual(self.run_cli("show", "@nope/global", "CLAUDE.md")[0], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

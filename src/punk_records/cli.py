@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -72,10 +73,32 @@ def cmd_untrack(store: Store, a) -> int:
     return 0
 
 
+JSON_VERSION = 1  # bump only for incompatible changes; editor integrations check it
+
+
+def _action_json(a) -> dict:
+    return {"kind": a.kind, "satellite": a.sat, "path": a.rel, "note": a.note}
+
+
 def cmd_list(store: Store, a) -> int:
     store.require()
     paths = store.load_state()["paths"]
     sats = store.satellites()
+    if a.json:
+        from .team import Team
+        team = Team(store)
+        print(json.dumps({
+            "version": JSON_VERSION,
+            "satellites": [{"id": sid, "kind": store._kind(sid), "name": sats.get(sid, {}).get("name", sid),
+                            "local_path": paths.get(sid),
+                            "memories": [r for _, r in store.memories(sid)] if sid in sats else []}
+                           for sid in sorted(set(sats) | set(paths))],
+            "subscriptions": [{"name": name, "url": team.url(name),
+                               "satellites": [{"id": sid, "memories": [r for _, r in team.files(name, sid)]}
+                                              for sid in team.satellites(name)]}
+                              for name in team.names()],
+        }, indent=2))
+        return 0
     for sid in sorted(set(sats) | set(paths)):
         n = len(store.memories(sid)) if sid in sats else 0
         where = paths.get(sid, "(not on this machine)")
@@ -117,6 +140,17 @@ def cmd_restore(store: Store, a) -> int:
 
 def cmd_status(store: Store, a) -> int:
     store.require()
+    if a.json:
+        from .crypt import Crypt
+        crypt = Crypt(store)
+        name = store.remote()
+        remote = ({"kind": "encrypted", "url": crypt.url()} if crypt.enabled else
+                  {"kind": "git", "url": store.git("remote", "get-url", name).stdout.strip()} if name else None)
+        print(json.dumps({"version": JSON_VERSION,
+                          "save": [_action_json(x) for x in store.save(dry_run=True)],
+                          "restore": [_action_json(x) for x in store.restore(dry_run=True)],
+                          "remote": remote}, indent=2))
+        return 0
     print("Local changes `punk save` would store:")
     s = store.save(dry_run=True)
     _report(s, "  none")
@@ -278,6 +312,13 @@ def cmd_search(store: Store, a) -> int:
 
 def cmd_show(store: Store, a) -> int:
     store.require()
+    if a.satellite and a.satellite.startswith("@") and a.path:  # a subscribed team store, read-only
+        from .team import Team
+        name, _, sid = a.satellite[1:].partition("/")
+        if name not in Team(store).names():
+            raise PunkError(f"not subscribed to {name!r} (see `punk subscriptions`)")
+        sys.stdout.write(Team(store).read(name, sid, a.path))
+        return 0
     if a.path:
         sys.stdout.write(store.read(a.satellite, a.path))
         return 0
@@ -373,7 +414,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("id")
     sp.add_argument("--purge", action="store_true", help="also delete its records from the store")
 
-    add("list", cmd_list, "list satellites (projects) and where they live here", aliases=["ls"])
+    sp = add("list", cmd_list, "list satellites (projects) and where they live here", aliases=["ls"])
+    sp.add_argument("--json", action="store_true", help="machine-readable, with memories and subscriptions")
 
     sp = add("scan", cmd_scan, "show which memory files would be picked up")
     sp.add_argument("path", nargs="?", default=".")
@@ -392,7 +434,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--prune", action="store_true", help="delete local files removed from the store")
     sp.add_argument("-n", "--dry-run", action="store_true")
 
-    add("status", cmd_status, "what save/restore would do")
+    sp = add("status", cmd_status, "what save/restore would do")
+    sp.add_argument("--json", action="store_true", help="machine-readable output")
 
     sp = add("diff", cmd_diff, "show how local memories differ from the store (exit 1 if they do)")
     sp.add_argument("satellite", nargs="?", help="satellite id (default: all tracked here)")
