@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `punk install-hooks` adds Claude Code hooks that restore memories when a session starts and save
+  and sync them when it ends; `--project` for one project, `--uninstall` to remove them
+
 ## 0.1.0 - 2026-11-17
 
 First release.

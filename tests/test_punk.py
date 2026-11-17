@@ -809,5 +809,207 @@ class TestDiff(Base):
         self.assertIn(f"punk diff {sid} CLAUDE.md", err)
 
 
+class TestHooks(Base):
+    def setUp(self):
+        super().setUp()
+        self.store = Store(self.tmp / "s")
+        self.store.init(track_global=False)
+        self.settings = Path(os.environ["HOME"]) / ".claude" / "settings.json"
+
+    def cli(self, *args, stdin=""):
+        from contextlib import redirect_stderr, redirect_stdout
+        from io import StringIO
+        out, err = StringIO(), StringIO()
+        old = sys.stdin
+        sys.stdin = StringIO(stdin)
+        try:
+            with redirect_stdout(out), redirect_stderr(err):
+                code = cli.main(["--home", str(self.store.root), *args])
+        finally:
+            sys.stdin = old
+        return code, out.getvalue(), err.getvalue()
+
+    def ours(self, settings):
+        return [(event, g.get("matcher"), h["args"][-1]) for event, groups in settings.get("hooks", {}).items()
+                for g in groups for h in g["hooks"] if "punk_records" in h.get("args", [])]
+
+    def test_install_merges_and_is_idempotent(self):
+        self.settings.parent.mkdir(parents=True)
+        mine = {"type": "command", "command": "echo hi"}
+        self.settings.write_text(json.dumps({"permissions": {"allow": ["Bash(ls)"]},
+                                             "hooks": {"SessionStart": [{"matcher": "startup", "hooks": [mine]}]}}))
+        code, out, _ = self.cli("install-hooks")
+        self.assertEqual(code, 0, out)
+        self.assertIn("installed", out)
+        data = json.loads(self.settings.read_text())
+        self.assertEqual(data["permissions"], {"allow": ["Bash(ls)"]})
+        self.assertEqual(data["hooks"]["SessionStart"][0], {"matcher": "startup", "hooks": [mine]})
+        self.assertEqual(self.ours(data), [("SessionStart", "startup|resume", "session-start"),
+                                           ("SessionEnd", None, "session-end")])
+        h = data["hooks"]["SessionEnd"][-1]["hooks"][0]
+        self.assertEqual(h["command"], sys.executable)
+        self.assertEqual(h["args"], ["-m", "punk_records", "--home", str(self.store.root.resolve()), "hook",
+                                     "session-end"])
+        self.assertEqual(h["timeout"], 30)
+        self.assertTrue((self.settings.parent / "settings.json.punk-bak").is_file())
+        before = self.settings.read_bytes()
+        code, out, _ = self.cli("install-hooks")
+        self.assertIn("already installed", out)
+        self.assertEqual(self.settings.read_bytes(), before)
+
+    def test_uninstall_removes_only_ours(self):
+        self.settings.parent.mkdir(parents=True)
+        mine = {"type": "command", "command": "echo bye"}
+        self.settings.write_text(json.dumps({"hooks": {"SessionEnd": [{"hooks": [mine]}]}, "model": "x"}))
+        self.cli("install-hooks")
+        code, out, _ = self.cli("install-hooks", "--uninstall")
+        self.assertEqual(code, 0)
+        self.assertIn("removed", out)
+        self.assertEqual(json.loads(self.settings.read_text()),
+                         {"hooks": {"SessionEnd": [{"hooks": [mine]}]}, "model": "x"})
+        self.cli("install-hooks")
+        self.settings.write_text(json.dumps({"hooks": {"SessionStart": json.loads(
+            self.settings.read_text())["hooks"]["SessionStart"][-1:]}}))
+        self.cli("install-hooks", "--uninstall")
+        self.assertEqual(json.loads(self.settings.read_text()), {})  # empty containers dropped
+
+    def test_invalid_settings_are_never_overwritten(self):
+        self.settings.parent.mkdir(parents=True)
+        self.settings.write_text("{ not json")
+        code, _, err = self.cli("install-hooks")
+        self.assertEqual(code, 2)
+        self.assertIn("not valid JSON", err)
+        self.assertEqual(self.settings.read_text(), "{ not json")
+        self.settings.write_text(json.dumps({"hooks": []}))
+        self.assertEqual(self.cli("install-hooks")[0], 2)
+        self.assertEqual(json.loads(self.settings.read_text()), {"hooks": []})
+
+    def test_project_scope_uses_local_settings(self):
+        p = self.project("app")
+        code, out, _ = self.cli("install-hooks", "--project", str(p))
+        self.assertEqual(code, 0)
+        target = p / ".claude" / "settings.local.json"
+        self.assertIn(str(target), out)
+        self.assertIn(".gitignore", out)  # not ignored yet: tell the user
+        self.assertEqual(len(self.ours(json.loads(target.read_text()))), 2)
+        self.assertFalse(self.settings.exists())
+
+    def test_dry_run_writes_nothing(self):
+        code, out, _ = self.cli("install-hooks", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertFalse(self.settings.exists())
+
+    def test_session_start_restores_quietly(self):
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("v1\n")
+        sid = self.store.track(p)
+        self.store.save()
+        (self.store.records / sid / "CLAUDE.md").write_text("v2 from another machine\n")
+        self.store.commit("other machine")
+        code, out, err = self.cli("hook", "session-start", stdin=json.dumps({"cwd": str(p / "sub")}))
+        self.assertEqual((code, out), (0, ""))  # stdout would be added to Claude's context
+        self.assertEqual((p / "CLAUDE.md").read_text(), "v2 from another machine\n")
+
+    def test_session_start_reports_conflicts_to_the_user(self):
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("v1\n")
+        sid = self.store.track(p)
+        self.store.save()
+        (self.store.records / sid / "CLAUDE.md").write_text("store v2\n")
+        self.store.commit("other machine")
+        (p / "CLAUDE.md").write_text("local v2\n")
+        code, out, _ = self.cli("hook", "session-start", stdin=json.dumps({"cwd": str(p)}))
+        self.assertEqual(code, 0)
+        msg = json.loads(out)["systemMessage"]
+        self.assertIn("conflict", msg)
+        self.assertIn("punk diff", msg)
+        self.assertEqual((p / "CLAUDE.md").read_text(), "local v2\n")
+
+    def test_session_end_saves_and_pushes(self):
+        remote = self.tmp / "remote.git"
+        git("init", "-q", "--bare", str(remote), cwd=self.tmp)
+        git("remote", "add", "origin", str(remote), cwd=self.store.root)
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("learned something\n")
+        sid = self.store.track(p)
+        other = self.project("other", remote="git@github.com:me/other.git")
+        (other / "CLAUDE.md").write_text("not this one\n")
+        self.store.track(other)
+        code, out, err = self.cli("hook", "session-end", stdin=json.dumps({"cwd": str(p), "reason": "other"}))
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.store.records / sid / "CLAUDE.md").read_text(), "learned something\n")
+        self.assertFalse((self.store.records / "github.com/me/other").exists())  # only this session's project
+        pushed = subprocess.run(["git", "--git-dir", str(remote), "show", f"main:records/{sid}/CLAUDE.md"],
+                                capture_output=True, text=True).stdout
+        self.assertEqual(pushed, "learned something\n")
+
+    def test_session_end_shows_blocked_secrets_on_exit(self):
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("token ghp_" + "a" * 36 + "\n")
+        self.store.track(p)
+        code, _, err = self.cli("hook", "session-end", stdin=json.dumps({"cwd": str(p)}))
+        self.assertEqual(code, 2)  # exit 2: stderr is shown to the user
+        self.assertIn("blocked", err)
+
+    def test_hooks_never_break_a_session(self):
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("x\n")
+        # untracked project, no global satellite: nothing to do
+        self.assertEqual(self.cli("hook", "session-start", stdin=json.dumps({"cwd": str(p)})), (0, "", ""))
+        # unreachable remote: still restores locally, says so to the user only
+        sid = self.store.track(p)
+        self.store.save()
+        git("remote", "add", "origin", str(self.tmp / "missing.git"), cwd=self.store.root)
+        (self.store.records / sid / "CLAUDE.md").write_text("y\n")
+        self.store.commit("other machine")
+        code, out, _ = self.cli("hook", "session-start", stdin=json.dumps({"cwd": str(p)}))
+        self.assertEqual(code, 0)
+        self.assertIn("could not reach", json.loads(out)["systemMessage"])
+        self.assertEqual((p / "CLAUDE.md").read_text(), "y\n")
+        # no store at all, bad stdin
+        code = subprocess.run([sys.executable, "-m", "punk_records", "--home", str(self.tmp / "none"),
+                               "hook", "session-start"], input=b"not json", capture_output=True,
+                              env={**os.environ, "PYTHONPATH": str(ROOT / "src")}).returncode
+        self.assertEqual(code, 0)
+
+    def test_unexpected_errors_are_reported_not_raised(self):
+        p = self.project("app")
+        self.store.track(p)
+        self.store.state_path.write_text("{ corrupted")  # load_state raises a plain ValueError
+        code, out, _ = self.cli("hook", "session-start", stdin=json.dumps({"cwd": str(p)}))
+        self.assertEqual(code, 0)
+        self.assertIn("hook session-start failed", json.loads(out)["systemMessage"])
+        code, _, err = self.cli("hook", "session-end", stdin=json.dumps({"cwd": str(p)}))
+        self.assertEqual(code, 2)
+        self.assertIn("hook session-end failed", err)
+
+    def test_warns_when_hook_python_cannot_import_punk(self):
+        from unittest import mock
+
+        from punk_records import hooks
+        with mock.patch.object(hooks, "runnable", return_value=False):
+            code, _, err = self.cli("install-hooks")
+        self.assertEqual(code, 0)
+        self.assertIn("cannot import punk_records without PYTHONPATH", err)
+        self.cli("install-hooks", "--uninstall")
+        with mock.patch.object(hooks, "runnable", return_value=True):
+            self.assertEqual(self.cli("install-hooks")[2], "")
+
+    def test_installed_command_runs_as_written(self):
+        """Run the exact exec-form command from settings.json, like Claude Code does (no shell)."""
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("v1\n")
+        sid = self.store.track(p)
+        self.store.save()
+        (self.store.records / sid / "CLAUDE.md").write_text("v2\n")
+        self.store.commit("other machine")
+        self.cli("install-hooks")
+        h = json.loads(self.settings.read_text())["hooks"]["SessionStart"][-1]["hooks"][0]
+        r = subprocess.run([h["command"], *h["args"]], input=json.dumps({"cwd": str(p)}).encode(),
+                           capture_output=True, env={**os.environ, "PYTHONPATH": str(ROOT / "src")})
+        self.assertEqual((r.returncode, r.stdout), (0, b""), r.stderr)
+        self.assertEqual((p / "CLAUDE.md").read_text(), "v2\n")
+
+
 if __name__ == "__main__":
     unittest.main()

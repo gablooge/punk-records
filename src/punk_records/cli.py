@@ -175,6 +175,37 @@ def cmd_git(store: Store, a) -> int:
     return subprocess.call(["git", "-C", str(store.root), *a.args])
 
 
+def cmd_install_hooks(store: Store, a) -> int:
+    from . import hooks
+    if not a.uninstall:
+        store.require()
+    project = Path(a.project).expanduser().resolve() if a.project else None
+    path, status = hooks.install(store, project, uninstall=a.uninstall, dry_run=a.dry_run)
+    verb = {"installed": "installed", "updated": "updated", "removed": "removed",
+            "unchanged": "nothing to remove" if a.uninstall else "already installed"}[status]
+    print(f"{'would be ' if a.dry_run and status != 'unchanged' else ''}{verb}: Claude Code hooks in {path}")
+    if a.uninstall or status == "unchanged":
+        return 0
+    print("  session start: restore this project's and your global memories (pull first if online)\n"
+          "  session end:   save them, then pull and push if a remote is set")
+    if not hooks.runnable():
+        print(f"  warning: {sys.executable} cannot import punk_records without PYTHONPATH, so the hooks would "
+              f"fail; install punk with `pipx install punk-records` (or `pip install .`) and run this again",
+              file=sys.stderr)
+    if project and hooks.gitignored(project, ".claude/settings.local.json") is False:
+        print(f"  note: add .claude/settings.local.json to {project / '.gitignore'}; it holds paths for "
+              f"this machine only")
+    return 0
+
+
+def cmd_hook(store: Store, a) -> int:
+    from . import hooks
+    code, out, err = hooks.run(store, a.event, sys.stdin.read())
+    sys.stdout.write(out)
+    sys.stderr.write(err)
+    return code
+
+
 def cmd_mcp(store: Store, a) -> int:
     from .mcp import serve
     store.require()
@@ -267,6 +298,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("args", nargs=argparse.REMAINDER)
 
     add("mcp", cmd_mcp, "run the MCP server on stdio (for Claude Code, Cursor, ...)")
+
+    sp = add("install-hooks", cmd_install_hooks,
+             "restore memories when a Claude Code session starts, save them when it ends")
+    sp.add_argument("--project", nargs="?", const=".", metavar="DIR",
+                    help="only for this project (.claude/settings.local.json) instead of all projects")
+    sp.add_argument("--uninstall", action="store_true", help="remove punk's hooks, keep everything else")
+    sp.add_argument("-n", "--dry-run", action="store_true")
+
+    sp = add("hook", cmd_hook, "run a Claude Code hook (used by install-hooks; reads the hook's JSON on stdin)")
+    sp.add_argument("event", choices=["session-start", "session-end"])
     return p
 
 
