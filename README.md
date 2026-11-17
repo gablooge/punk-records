@@ -126,6 +126,17 @@ your attention, such as a conflict or a blocked secret. Your other settings and 
 the previous file is kept as `.punk-bak`, and `punk install-hooks --uninstall` removes only punk's
 entries. Only tracked projects are synced.
 
+### Save as you go
+
+```bash
+punk watch                      # save memory files a moment after they change (Ctrl+C to stop)
+punk watch --sync-every 300     # ...and pull/push every 5 minutes when a remote is set
+```
+
+`punk watch` checks the memory files it knows every 2 seconds (`--interval`) and saves once they have
+been quiet for 2 seconds (`--debounce`), so a burst of edits becomes one commit. New memory files are
+found by a full rescan every 30 seconds (`--rescan`). No file-system events, no extra dependencies.
+
 From the shell: `punk remember "- integration tests need docker running"` appends to the current
 project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
 
@@ -187,6 +198,7 @@ search | show | context | remember
 git ...           run git inside the store
 mcp               MCP server on stdio
 install-hooks     sync automatically when Claude Code sessions start and end
+watch             save automatically when memory files change
 ```
 
 ## Roadmap
