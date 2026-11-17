@@ -20,7 +20,7 @@ development tool only:
 pipx run --spec ruff==0.17.5 ruff check .   # or: pip install ruff==0.17.5 && ruff check .
 ```
 
-CI runs the tests on Linux, macOS and Windows with Python 3.9 and 3.13, and ruff on Linux.
+CI runs the tests on Linux, macOS and Windows with Python 3.9, 3.13 and 3.15, and ruff on Linux.
 
 ## Rules
 
