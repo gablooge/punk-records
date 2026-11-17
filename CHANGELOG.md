@@ -5,6 +5,8 @@
 - `punk status --json` and `punk list --json` (satellites, local paths, memory files, team
   subscriptions) for editor integrations; the JSON carries `"version": 1`
 - `punk show @team/<satellite> <path>` prints a memory from a subscribed team store
+- `punk show <satellite> <path>` writes the stored bytes when piped: no more `\r\n` for every `\n`
+  on Windows, and files saved with `\r\n` keep them (also in MCP `read_memory`)
 
 ## 0.3.1 - 2026-11-17
 

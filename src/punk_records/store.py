@@ -807,7 +807,7 @@ class Store:
         target = _safe_target(base, self._follow_links(sid, rel))
         if not target.is_file():
             raise PunkError(f"no memory {sid}/{rel}")
-        return target.read_text("utf-8", "replace")
+        return target.read_bytes().decode("utf-8", "replace")  # keeps "\r\n" as stored
 
     def search(self, query: str, regex: bool = False, sid: str | None = None):
         """Matching lines in your memories, then in subscribed team stores (labelled `@name/<sid>`)."""

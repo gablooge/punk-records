@@ -310,6 +310,18 @@ def cmd_search(store: Store, a) -> int:
     return 0 if hits else 1
 
 
+def _write_exact(text: str) -> None:
+    """Write file contents as their UTF-8 bytes when piped: a Windows text-mode stdout would turn
+    every "\n" into "\r\n", and callers (the VS Code extension's diff view) compare byte for byte."""
+    buf = getattr(sys.stdout, "buffer", None)
+    if buf is None or sys.stdout.isatty():
+        sys.stdout.write(text)
+        return
+    sys.stdout.flush()
+    buf.write(text.encode("utf-8"))
+    buf.flush()
+
+
 def cmd_show(store: Store, a) -> int:
     store.require()
     if a.satellite and a.satellite.startswith("@") and a.path:  # a subscribed team store, read-only
@@ -317,10 +329,10 @@ def cmd_show(store: Store, a) -> int:
         name, _, sid = a.satellite[1:].partition("/")
         if name not in Team(store).names():
             raise PunkError(f"not subscribed to {name!r} (see `punk subscriptions`)")
-        sys.stdout.write(Team(store).read(name, sid, a.path))
+        _write_exact(Team(store).read(name, sid, a.path))
         return 0
     if a.path:
-        sys.stdout.write(store.read(a.satellite, a.path))
+        _write_exact(store.read(a.satellite, a.path))
         return 0
     for sid, rel in store.memories(a.satellite):
         print(f"{sid}/{rel}")
