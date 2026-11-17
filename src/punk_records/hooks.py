@@ -165,6 +165,8 @@ def run(store: Store, action: str, stdin_text: str) -> tuple[int, str, str]:
             except PunkError as e:
                 notes.append(f"punk: could not reach the remote ({_first_line(e)}); using the local store")
             actions = store.restore(ids)
+            from .team import Team
+            notes += [f"punk: could not update subscription {name} ({error})" for name, error in Team(store).update()]
         else:
             actions = store.save(ids)
             try:

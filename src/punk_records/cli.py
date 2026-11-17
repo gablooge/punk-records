@@ -214,6 +214,38 @@ def _interval(text: str) -> float:
     return value
 
 
+def cmd_subscribe(store: Store, a) -> int:
+    from .team import Team
+    team = Team(store)
+    team.subscribe(a.name, a.url)
+    sats = team.satellites(a.name)
+    print(f"subscribed to {a.name} ({a.url}): {len(sats)} satellite{'' if len(sats) == 1 else 's'}, read-only")
+    print("Its memories now appear in `punk context`, `punk search` and the MCP tools, labelled "
+          f"@{a.name}. `punk sync` keeps it up to date.")
+    return 0
+
+
+def cmd_unsubscribe(store: Store, a) -> int:
+    from .team import Team
+    store.require()
+    Team(store).unsubscribe(a.name)
+    print(f"unsubscribed from {a.name}")
+    return 0
+
+
+def cmd_subscriptions(store: Store, a) -> int:
+    from .team import Team
+    store.require()
+    team = Team(store)
+    names = team.names()
+    if not names:
+        print("no subscriptions (see `punk subscribe NAME URL`)")
+    for name in names:
+        print(f"{name:<16} {team.url(name)}  (updated {team.updated(name) or 'never'}; "
+              f"{len(team.satellites(name))} satellites)")
+    return 0
+
+
 def cmd_export(store: Store, a) -> int:
     path = store.export_bundle(Path(a.file))
     print(f"wrote {path} ({path.stat().st_size:,} bytes). Carry it over and run `punk import {path.name}`.")
@@ -376,6 +408,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("encrypt", cmd_encrypt, "sync through a remote that only sees an age-encrypted file")
     sp.add_argument("action", choices=["init", "add-recipient", "status"])
     sp.add_argument("value", nargs="?", help="init: the git URL; add-recipient: an age1... public key")
+
+    sp = add("subscribe", cmd_subscribe, "read another Punk Records store too, e.g. your team's (read-only)")
+    sp.add_argument("name", help="short name, e.g. acme")
+    sp.add_argument("url", help="git URL or path of that store")
+
+    sp = add("unsubscribe", cmd_unsubscribe, "stop reading a subscribed store")
+    sp.add_argument("name")
+
+    add("subscriptions", cmd_subscriptions, "list subscribed stores")
 
     sp = add("export", cmd_export, "write the store to a single bundle file (air-gapped transfer)")
     sp.add_argument("file")
