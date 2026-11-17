@@ -46,10 +46,13 @@ offline network.
 |---|---|
 | Any project | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENT.md`, `GEMINI.md`, `napkin.md`, `CONVENTIONS.md`, `.cursorrules`, `.windsurfrules`, `.clinerules`, `.goosehints` (anywhere in the tree) |
 | | `.claude/*.md` (napkins, commands, agents), `.claude/skills/*`, `.cursor/rules/*`, `.windsurf/rules/*`, `.clinerules/*`, `.roo/rules/*`, `.kiro/steering/*`, `.github/copilot-instructions.md`, `.github/instructions/*.md` |
+| | Claude Code auto memory, `~/.claude/projects/<project>/memory/*.md` (stored as `@claude-memory/...`; restored into the matching folder for the project's path on each machine, and shared by its worktrees) |
 | Global (`$HOME`) | `~/.claude/CLAUDE.md`, `~/.claude/napkin.md`, `~/.claude/{commands,agents,skills}/*`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.config/goose/.goosehints` |
 
 Run `punk scan` to see what would be captured. To add your own patterns, put globs in `punk.json`
 inside the store (`{"include": ["docs/ai/*.md"], "exclude": []}`).
+To leave Claude Code auto memory out, use `{"exclude": ["@claude-memory/*"]}`. `CLAUDE_CONFIG_DIR`
+is honoured; a custom `autoMemoryDirectory` setting is not read yet.
 
 ## Install
 

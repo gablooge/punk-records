@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from .discover import scan
+from .discover import local_path, scan
 from .store import Action, PunkError, Store
 
 
@@ -61,7 +61,7 @@ class Watcher:
             entries = {}
             for rel in files:  # stat follows symlinks, so edits through followed dotfile links count
                 try:
-                    st = (root / rel).stat()
+                    st = local_path(root, rel).stat()
                 except OSError:
                     continue  # deleted: missing from the fingerprint is a change
                 entries[rel] = (st.st_size, st.st_mtime_ns)
