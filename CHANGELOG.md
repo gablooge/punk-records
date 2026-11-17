@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Changed:** the MCP `sync` tool is off by default because it reaches the network; register the
+  server as `punk mcp --allow-sync` to offer it
+- MCP `write_memory` replaces a memory file with conflict checks: it needs the sha256 that
+  `read_memory` now reports, and refuses if the file changed since or has unsaved local edits
+- Every memory file is an MCP resource (`punk-records:///<satellite>/<path>`), and a `punk-context`
+  prompt starts a conversation with your memories
+- The MCP server speaks the 2026-07-28 revision (`server/discover`, per-request versions) as well as
+  `initialize`-based clients, and answers `initialize` with a version it supports instead of echoing
+  the client's
+- `get_context` and the prompt default to the project the client started in (`CLAUDE_PROJECT_DIR`)
+
 ## 0.2.0 - 2026-11-17
 
 Sync without thinking about it, and on hosts you do not trust.

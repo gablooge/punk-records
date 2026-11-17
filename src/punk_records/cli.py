@@ -296,7 +296,7 @@ def cmd_hook(store: Store, a) -> int:
 def cmd_mcp(store: Store, a) -> int:
     from .mcp import serve
     store.require()
-    serve(store)
+    serve(store, allow_sync=a.allow_sync)
     return 0
 
 
@@ -404,7 +404,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("git", cmd_git, "run any git command inside the store")
     sp.add_argument("args", nargs=argparse.REMAINDER)
 
-    add("mcp", cmd_mcp, "run the MCP server on stdio (for Claude Code, Cursor, ...)")
+    sp = add("mcp", cmd_mcp, "run the MCP server on stdio (for Claude Code, Cursor, ...)")
+    sp.add_argument("--allow-sync", action="store_true",
+                    help="also offer the sync tool, which pulls and pushes the git remote")
 
     sp = add("install-hooks", cmd_install_hooks,
              "restore memories when a Claude Code session starts, save them when it ends")

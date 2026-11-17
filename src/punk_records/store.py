@@ -825,6 +825,60 @@ class Store:
                 parts.append(f"<!-- punk-records: {sid}/{rel} -->\n{self.read(sid, rel).rstrip()}\n")
         return "\n".join(parts)
 
+    def _write_target(self, sid: str, rel: str) -> tuple[str, Path, str | None]:
+        """Resolve where a write to sid/rel lands: (rel, store path, local root or None).
+
+        Follows symlinked memories (AGENTS.md -> CLAUDE.md): first a local link on this machine, if
+        it stays inside the project, then links recorded in the store. Only memory paths qualify.
+        """
+        self.require()
+        validate_id(sid)
+        if sid not in self.satellites():
+            raise PunkError(f"unknown satellite: {sid}")
+        kind, cfg = self._kind(sid), self.config()
+        if not is_memory_path(rel, kind, cfg):
+            raise PunkError(f"{rel} is not a memory path (e.g. CLAUDE.md, AGENTS.md, napkin.md)")
+        local_root = self.load_state()["paths"].get(sid)
+        local = _local_link(Path(local_root), rel) if local_root else None
+        if local and local != OUTSIDE and is_memory_path(local, kind, cfg):
+            rel = local  # linked here but not saved yet
+        rel = self._follow_links(sid, rel)
+        if not is_memory_path(rel, kind, cfg):
+            raise PunkError(f"{rel} is not a memory path (e.g. CLAUDE.md, AGENTS.md, napkin.md)")
+        return rel, _safe_target(self.records / sid, rel), local_root
+
+    def write(self, sid: str, rel: str, content: str, base_sha256: str | None = None) -> tuple[str, str]:
+        """Replace a memory file, refusing if it changed since the caller read it.
+
+        `base_sha256` is the hash of the store copy the caller based its edit on (read_memory reports
+        it); required when the file exists. Refuses if this machine's copy has unsaved edits, so they
+        are never overwritten. Keeps a CRLF file CRLF. Returns (path written, new sha256).
+        """
+        rel, target, local_root = self._write_target(sid, rel)
+        if secrets.scan(content):
+            raise PunkError("refusing to store text that looks like a secret")
+        current = target.read_bytes() if target.is_file() else None
+        if current is not None and not base_sha256:
+            raise PunkError(f"{sid}/{rel} exists: read it with read_memory first and pass its sha256 "
+                            f"as base_sha256")
+        if current is None and base_sha256:
+            raise PunkError(f"{sid}/{rel} was removed since you read it; read it again")
+        if current is not None and sha(current) != base_sha256:
+            raise PunkError(f"{sid}/{rel} changed since you read it; read it again and redo the edit")
+        if local_root and any(a.rel == rel for a in self.save([sid], dry_run=True)):
+            raise PunkError(f"{sid}/{rel} has unsaved edits on this machine; run `punk save` (or append "
+                            f"instead) so they are not overwritten")
+        data = content.replace("\r\n", "\n")
+        if current is not None and b"\r\n" in current:
+            data = data.replace("\n", "\r\n")  # keep the file's own line endings
+        out = data.encode("utf-8")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(out)
+        self.commit(f"write {sid}/{rel}")
+        if local_root:
+            self.restore([sid])
+        return rel, sha(out)
+
     def append(self, sid: str, rel: str, text: str) -> str:
         """Add a note to a memory file in the store and propagate it locally.
 
@@ -832,22 +886,9 @@ class Store:
         local link on this machine, if it stays inside the project, then links recorded in the
         store. Returns the path that was written.
         """
-        self.require()
-        validate_id(sid)
-        if sid not in self.satellites():
-            raise PunkError(f"unknown satellite: {sid}")
-        if not is_memory_path(rel, self._kind(sid), self.config()):
-            raise PunkError(f"{rel} is not a memory path (e.g. CLAUDE.md, AGENTS.md, napkin.md)")
-        local_root = self.load_state()["paths"].get(sid)
-        local = _local_link(Path(local_root), rel) if local_root else None
-        if local and local != OUTSIDE and is_memory_path(local, self._kind(sid), self.config()):
-            rel = local  # linked here but not saved yet
-        rel = self._follow_links(sid, rel)
-        if not is_memory_path(rel, self._kind(sid), self.config()):
-            raise PunkError(f"{rel} is not a memory path (e.g. CLAUDE.md, AGENTS.md, napkin.md)")
+        rel, target, local_root = self._write_target(sid, rel)
         if secrets.scan(text):
             raise PunkError("refusing to store text that looks like a secret")
-        target = _safe_target(self.records / sid, rel)
         existing = target.read_bytes() if target.is_file() else b""
         existing.decode("utf-8")  # refuse to append to a file that is not UTF-8 text
         eol = b"\r\n" if b"\r\n" in existing else b"\n"  # keep the file's own line endings
