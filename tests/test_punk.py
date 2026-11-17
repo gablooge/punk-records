@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -282,6 +283,30 @@ class TestSync(Base):
         (p / "napkin.md").unlink()
         self.assertEqual([x.kind for x in s.save()], ["delete"])
         self.assertFalse((s.records / sid / "napkin.md").exists())
+
+    def test_moved_project_is_not_deleted_from_the_store(self):
+        """The project moved and its old folder stayed behind with no clone in it (or another one)."""
+        s = Store(self.tmp / "s")
+        s.init(track_global=False)
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("keep me\n")
+        sid = s.track(p)
+        s.save()
+        shutil.rmtree(p)
+        p.mkdir()  # an empty folder at the old path
+        for act, n in ((s.save, 1), (s.restore, 1), (s.sync, 2)):  # sync = save + restore
+            got = [(x.kind, x.sat) for x in act()]
+            self.assertEqual(got, [("missing", sid)] * n, act.__name__)
+        self.assertEqual((s.records / sid / "CLAUDE.md").read_text(), "keep me\n")
+        self.assertEqual(list(p.iterdir()), [])
+        git("init", "-q", cwd=p)
+        git("remote", "add", "origin", "git@github.com:Me/Other.git", cwd=p)
+        self.assertIn("no longer a clone", s.save()[0].note)
+        q = self.project("app-moved")
+        (q / "CLAUDE.md").write_text("keep me\n")
+        self.assertEqual(s.track(q), sid)
+        self.assertEqual([x.kind for x in s.save()], [])
+        self.assertEqual((s.records / sid / "CLAUDE.md").read_text(), "keep me\n")
 
     def test_global_memories(self):
         home = Path(os.environ["HOME"])
