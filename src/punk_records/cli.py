@@ -145,6 +145,36 @@ def cmd_dedupe(store: Store, a) -> int:
     return _report(dedupe.apply(store, found), "local copies updated")
 
 
+def cmd_watch(store: Store, a) -> int:
+    from .watch import Watcher
+    store.require()
+    if a.ids:
+        store._local_ids(store.load_state(), a.ids)  # unknown ids are an error, not silently ignored
+    w = Watcher(store, a.ids or None, interval=a.interval, debounce=a.debounce, sync_every=a.sync_every)
+    n = len(w.satellites())
+    extra = f", syncing every {a.sync_every:g}s" if a.sync_every and store.remote() else ""
+    print(f"watching {n} satellite{'' if n == 1 else 's'} every {a.interval:g}s{extra} (Ctrl+C to stop)")
+    try:
+        w.run()
+    except KeyboardInterrupt:
+        print("stopped")
+    return 0
+
+
+def _seconds(text: str) -> float:
+    value = float(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be 0 or more")
+    return value
+
+
+def _interval(text: str) -> float:
+    value = float(text)
+    if value <= 0:
+        raise argparse.ArgumentTypeError("must be more than 0")
+    return value
+
+
 def cmd_export(store: Store, a) -> int:
     path = store.export_bundle(Path(a.file))
     print(f"wrote {path} ({path.stat().st_size:,} bytes). Carry it over and run `punk import {path.name}`.")
@@ -292,6 +322,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("satellite", nargs="?", help="satellite id (default: all)")
     sp.add_argument("path", nargs="?", help="one memory file, e.g. CLAUDE.md")
     sp.add_argument("--apply", action="store_true", help="remove them, commit, and update local copies")
+
+    sp = add("watch", cmd_watch, "save automatically when memory files change (Ctrl+C to stop)")
+    sp.add_argument("ids", nargs="*", help="satellites to watch (default: all tracked here)")
+    sp.add_argument("--interval", type=_interval, default=2.0, metavar="SECONDS", help="how often to look (2)")
+    sp.add_argument("--debounce", type=_seconds, default=2.0, metavar="SECONDS",
+                    help="save once files have been quiet this long (2)")
+    sp.add_argument("--sync-every", type=_seconds, default=0.0, metavar="SECONDS",
+                    help="also pull and push on this schedule when a remote is set (off)")
 
     sp = add("export", cmd_export, "write the store to a single bundle file (air-gapped transfer)")
     sp.add_argument("file")

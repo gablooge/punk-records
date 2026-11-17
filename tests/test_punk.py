@@ -1134,5 +1134,131 @@ class TestDedupe(Base):
                          "# rules\n- tabs\n- docker needed\n\n## Notes\n- ci is slow\n")
 
 
+class TestWatch(Base):
+    def setUp(self):
+        super().setUp()
+        self.store = Store(self.tmp / "s")
+        self.store.init(track_global=False)
+        self.p = self.project("app")
+        (self.p / "CLAUDE.md").write_text("v1\n")
+        self.sid = self.store.track(self.p)
+        self.store.save()
+        self.lines = []
+
+    def watcher(self, **kw):
+        from punk_records.watch import Watcher
+        return Watcher(self.store, out=self.lines.append, **kw)
+
+    def record(self):
+        return (self.store.records / self.sid / "CLAUDE.md").read_text()
+
+    def edit(self, text, bump):
+        f = self.p / "CLAUDE.md"
+        f.write_text(text)
+        st = f.stat()
+        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + bump))  # make the change visible to mtime polling
+
+    def test_saves_after_changes_settle(self):
+        w = self.watcher(debounce=2)
+        w.tick(0)
+        self.edit("v2\n", 1_000_000_000)
+        w.tick(1)  # change seen, waiting for it to settle
+        self.assertEqual(self.record(), "v1\n")
+        self.edit("v3\n", 2_000_000_000)
+        w.tick(2.5)  # still changing: the timer restarts
+        self.assertEqual(self.record(), "v1\n")
+        w.tick(4)  # 1.5 s quiet: not yet
+        self.assertEqual(self.record(), "v1\n")
+        w.tick(4.6)  # 2.1 s quiet: save once
+        self.assertEqual(self.record(), "v3\n")
+        self.assertTrue(any("update" in x and "CLAUDE.md" in x for x in self.lines), self.lines)
+        commits = self.store.git("rev-list", "--count", "HEAD").stdout.strip()
+        w.tick(10)
+        self.assertEqual(self.store.git("rev-list", "--count", "HEAD").stdout.strip(), commits)
+
+    def test_start_saves_edits_made_while_not_watching(self):
+        self.edit("offline edit\n", 1_000_000_000)
+        self.watcher().start()
+        self.assertEqual(self.record(), "offline edit\n")
+
+    def test_new_files_are_noticed(self):
+        w = self.watcher(debounce=0)
+        w.tick(0)
+        (self.p / "napkin.md").write_text("new\n")
+        w.tick(1)
+        w.tick(2)
+        self.assertEqual((self.store.records / self.sid / "napkin.md").read_text(), "new\n")
+
+    def test_sync_every(self):
+        remote = self.tmp / "remote.git"
+        git("init", "-q", "--bare", str(remote), cwd=self.tmp)
+        git("remote", "add", "origin", str(remote), cwd=self.store.root)
+        w = self.watcher(sync_every=60)
+        w.tick(0)
+        w.tick(30)
+        self.assertNotEqual(subprocess.run(["git", "--git-dir", str(remote), "rev-parse", "main"],
+                                           capture_output=True).returncode, 0)  # nothing pushed yet
+        w.tick(61)
+        pushed = subprocess.run(["git", "--git-dir", str(remote), "show", f"main:records/{self.sid}/CLAUDE.md"],
+                                capture_output=True, text=True).stdout
+        self.assertEqual(pushed, "v1\n")
+
+    def test_errors_are_reported_and_watching_continues(self):
+        from unittest import mock
+        w = self.watcher(debounce=0)
+        w.tick(0)
+        self.edit("v2\n", 1_000_000_000)
+        with mock.patch.object(self.store, "save", side_effect=PunkError("git add -A failed: index.lock")):
+            w.tick(1)
+            w.tick(2)
+        self.assertTrue(any("index.lock" in x for x in self.lines), self.lines)
+        w.tick(3)  # the change is still pending: retried
+        self.assertEqual(self.record(), "v2\n")
+
+    def test_only_given_satellites_and_missing_roots(self):
+        other = self.project("other", remote="git@github.com:me/other.git")
+        (other / "CLAUDE.md").write_text("o1\n")
+        osid = self.store.track(other)
+        self.store.save()
+        w = self.watcher(ids=[self.sid], debounce=0)
+        w.tick(0)
+        (other / "CLAUDE.md").write_text("o2\n")
+        self.edit("v2\n", 1_000_000_000)
+        w.tick(1)
+        w.tick(2)
+        self.assertEqual(self.record(), "v2\n")
+        self.assertEqual((self.store.records / osid / "CLAUDE.md").read_text(), "o1\n")
+        import shutil
+        shutil.rmtree(self.p)  # a tracked project that is gone must not stop the watcher
+        w.tick(3)
+        w.tick(4)
+
+    def test_cli_rejects_bad_timings_and_ids(self):
+        from contextlib import redirect_stderr, redirect_stdout
+        from io import StringIO
+        from unittest import mock
+        # if validation were missing, the watcher would start: stop it at the first sleep instead of hanging
+        with mock.patch("punk_records.watch.time.sleep", side_effect=KeyboardInterrupt), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            for args in (["--interval", "0"], ["--debounce", "-1"]):
+                with self.assertRaises(SystemExit) as e:
+                    cli.main(["--home", str(self.store.root), "watch", *args])
+                self.assertEqual(e.exception.code, 2)
+            self.assertEqual(cli.main(["--home", str(self.store.root), "watch", "github.com/nope/nope"]), 2)
+
+    def test_cli_runs_until_interrupted(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from unittest import mock
+        self.edit("offline edit\n", 1_000_000_000)
+        out = StringIO()
+        with mock.patch("punk_records.watch.time.sleep", side_effect=KeyboardInterrupt), redirect_stdout(out):
+            code = cli.main(["--home", str(self.store.root), "watch", "--interval", "1"])
+        self.assertEqual(code, 0)
+        self.assertIn("watching 1 satellite", out.getvalue())
+        self.assertIn("stopped", out.getvalue())
+        self.assertEqual(self.record(), "offline edit\n")
+
+
 if __name__ == "__main__":
     unittest.main()
