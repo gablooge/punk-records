@@ -472,10 +472,23 @@ def _utf8_when_piped() -> None:
             reconfigure(encoding="utf-8")
 
 
+def _split_git(argv: list[str]) -> tuple[list[str], list[str] | None]:
+    """Split `punk [--home X] git ARGS...`: argparse would take `git --help` / `git -h` for itself."""
+    i = 0
+    while i < len(argv) and argv[i].startswith("--home"):
+        i += 1 if "=" in argv[i] else 2
+    if i < len(argv) and argv[i] == "git":
+        return argv[:i + 1], argv[i + 1:]
+    return argv, None
+
+
 def main(argv: list[str] | None = None) -> int:
     _utf8_when_piped()
     parser = build_parser()
-    a = parser.parse_args(argv)
+    head, git_args = _split_git(list(sys.argv[1:] if argv is None else argv))
+    a = parser.parse_args(head)
+    if git_args is not None:
+        a.args = git_args
     if not getattr(a, "fn", None):
         parser.print_help()
         return 0
