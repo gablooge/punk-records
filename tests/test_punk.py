@@ -77,6 +77,33 @@ class TestSecrets(unittest.TestCase):
         self.assertEqual([h.kind for h in hits], ["anthropic-key", "aws-access-key"])
         self.assertNotIn("sk-ant", secrets.redact(text))
 
+    def test_generic_secret_ignores_placeholders(self):
+        placeholders = [
+            "Set api_key: YOUR_API_KEY_GOES_HERE in the config.",
+            'password = "xxxxxxxxxxxxxxxxxxxxxxxx"',
+            "access_token=EXAMPLE_ACCESS_TOKEN_123456",
+            "secret: SECRET_FROM_1PASSWORD_VAULT",
+            "password: changeme-changeme-changeme",
+            "api-key: your-api-key-from-the-dashboard",
+            "password=dummy_password_for_tests_only",
+            "api_key = 0000000000000000000000000000",
+            "secret: sample-secret-value-goes-here",
+        ]
+        for text in placeholders:
+            self.assertEqual(secrets.scan(text), [], text)
+        real = [
+            'api_key = "a8f5f167f44f4964e6c998dee827110c"',
+            "secret: 9b2d6f0a7c3e4b1d8f6a2c5e7b9d0f13",
+            "access_token=ya29-A0ARrdaMabcDEFghiJKLmnoPQRst",
+            "password: Zq8vR2mN7xL4pT9wK3",
+            "API_KEY=QK7ZPV2M9RXT4WNB6HJD",  # all caps but no underscore: not an env var name
+        ]
+        for text in real:
+            self.assertEqual([h.kind for h in secrets.scan(text)], ["generic-secret"], text)
+        # specific key formats are never relaxed, even with placeholder-looking words around them
+        self.assertEqual([h.kind for h in secrets.scan("example: sk-ant-api03-abcdefghijklmnopqrstuvwxyz")],
+                         ["anthropic-key"])
+
     def test_allow_marker(self):
         self.assertEqual(secrets.scan("AKIAABCDEFGHIJKLMNOP example  punk:allow"), [])
 
@@ -1810,6 +1837,52 @@ class TestTeamBrain(Base):
         code, out, _ = hooks.run(self.store, "session-start", json.dumps({"cwd": str(self.p)}))
         self.assertEqual((code, out), (0, ""))
         self.assertIn("hook fetched this", self.store.context(self.p))
+
+
+class TestRoughEdges(Base):
+    def run_cli(self, *args):
+        from contextlib import redirect_stderr, redirect_stdout
+        from io import StringIO
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = cli.main(["--home", str(self.tmp / "s"), *args])
+        return code, out.getvalue(), err.getvalue()
+
+    def test_git_passes_every_argument_to_git(self):
+        from unittest import mock
+        Store(self.tmp / "s").init(track_global=False)
+        with mock.patch("punk_records.cli.subprocess.call", return_value=0) as call:
+            self.assertEqual(self.run_cli("git", "--help")[0], 0)
+            self.assertEqual(call.call_args[0][0][-1:], ["--help"])
+            self.run_cli("git", "log", "-1", "--format=%s")
+            self.assertEqual(call.call_args[0][0][-3:], ["log", "-1", "--format=%s"])
+        with mock.patch("punk_records.cli.subprocess.call", return_value=0) as call:
+            cli.main([f"--home={self.tmp / 's'}", "git", "-h"])
+            self.assertEqual(call.call_args[0][0][-1:], ["-h"])
+
+    def test_track_warns_about_huge_folders(self):
+        from unittest import mock
+        Store(self.tmp / "s").init(track_global=False)
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("x\n")
+        for i in range(30):
+            (p / f"f{i}.txt").write_text("x")
+        code, _, err = self.run_cli("track", str(p))
+        self.assertEqual((code, err), (0, ""))  # a normal project: no warning
+        big = self.project("big", remote="git@github.com:me/big.git")
+        for i in range(30):
+            (big / f"f{i}.txt").write_text("x")
+        with mock.patch("punk_records.cli.HUGE_FOLDER", 20):
+            code, out, err = self.run_cli("track", str(big))
+        self.assertEqual(code, 0)  # still tracked: a warning, not a refusal
+        self.assertIn("tracking", out)
+        self.assertIn("more than 20 files", err)
+
+    def test_track_warns_about_the_home_folder(self):
+        Store(self.tmp / "s").init(track_global=False)
+        code, _, err = self.run_cli("track", os.environ["HOME"])
+        self.assertEqual(code, 0)
+        self.assertIn("home folder", err)
 
 
 if __name__ == "__main__":
