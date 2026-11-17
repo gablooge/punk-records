@@ -112,6 +112,20 @@ Any MCP client works the same way (`"command": "punk", "args": ["mcp"]`). If the
 `get_context`, `search_memories`, `read_memory`, `list_memories`, `list_satellites`,
 `append_memory` (writes to the store, commits, and updates the local file), and `sync`.
 
+### Sync automatically with Claude Code
+
+```bash
+punk install-hooks              # all projects (~/.claude/settings.json)
+punk install-hooks --project    # only this project (.claude/settings.local.json)
+```
+
+This adds two [Claude Code hooks](https://code.claude.com/docs/en/hooks): when a session starts, punk
+restores your global memories and the current project's (pulling first when a remote is set); when
+it ends, punk saves them and syncs. Nothing is printed into the conversation unless something needs
+your attention, such as a conflict or a blocked secret. Your other settings and hooks are left alone,
+the previous file is kept as `.punk-bak`, and `punk install-hooks --uninstall` removes only punk's
+entries. Only tracked projects are synced.
+
 From the shell: `punk remember "- integration tests need docker running"` appends to the current
 project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
 
@@ -169,6 +183,7 @@ export | import   air-gapped bundle files
 search | show | context | remember
 git ...           run git inside the store
 mcp               MCP server on stdio
+install-hooks     sync automatically when Claude Code sessions start and end
 ```
 
 ## Roadmap

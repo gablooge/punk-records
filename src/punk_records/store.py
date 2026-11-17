@@ -675,16 +675,23 @@ class Store:
             raise PunkError(f"could not merge {source} {ref}:\n{(r.stderr or r.stdout).strip()}\n"
                             f"Resolve by hand in {self.root} (it is a normal git repo).")
 
-    def sync(self, **save_kw) -> list[Action]:
-        """save -> pull -> push -> restore. Works offline: it just saves and restores."""
-        actions = self.save(**save_kw)
+    def exchange(self, push: bool = True) -> bool:
+        """Pull from the git remote (if it has our branch) and push to it. False if there is no remote."""
         remote = self.remote()
-        if remote:
-            branch = self.branch()
-            if self.git("ls-remote", "--heads", remote, branch).stdout.strip():
-                self.pull(remote, branch)
+        if not remote:
+            return False
+        branch = self.branch()
+        if self.git("ls-remote", "--heads", remote, branch).stdout.strip():
+            self.pull(remote, branch)
+        if push:
             self.git("push", "-q", "-u", remote, branch)
-        return actions + self.restore()
+        return True
+
+    def sync(self, ids: list[str] | None = None, **save_kw) -> list[Action]:
+        """save -> pull -> push -> restore. Works offline: it just saves and restores."""
+        actions = self.save(ids, **save_kw)
+        self.exchange()
+        return actions + self.restore(ids)
 
     def export_bundle(self, path: Path) -> Path:
         """Write the whole store into one file for sneakernet / air-gapped transfer."""
