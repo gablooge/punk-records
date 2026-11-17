@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-11-17
+
+Sync without thinking about it, and on hosts you do not trust.
 
 - `punk install-hooks` adds Claude Code hooks that restore memories when a session starts and save
   and sync them when it ends; `--project` for one project, `--uninstall` to remove them
@@ -12,6 +14,9 @@
   another machine, `punk encrypt add-recipient` adds another machine's own key
 - `punk watch` saves memory files a moment after they change (polling, no dependencies), with
   `--interval`, `--debounce`, `--rescan` and an optional `--sync-every`
+- `punk track` says "1 memory file" instead of "1 memory files"
+- README: using Punk Records with Claude Code, Cursor, Codex and AI tools without MCP, with prompt
+  examples
 
 ## 0.1.0 - 2026-11-17
 
