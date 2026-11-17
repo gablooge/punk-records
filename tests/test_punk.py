@@ -761,6 +761,18 @@ class TestDiff(Base):
             cli.main(["diff", "--help"])
         self.assertIn("exit 1 if they do", " ".join(out.getvalue().split()))
 
+    def test_track_counts_files_in_words(self):
+        Store(self.tmp / "s").init(track_global=False)
+        one = self.project("one")
+        (one / "CLAUDE.md").write_text("x\n")
+        two = self.project("two", remote="git@github.com:me/two.git")
+        (two / "CLAUDE.md").write_text("x\n")
+        (two / "AGENTS.md").write_text("y\n")
+        _, out, _ = self.run_cli("track", str(one))
+        self.assertIn("(1 memory file)", out)
+        _, out, _ = self.run_cli("track", str(two))
+        self.assertIn("(2 memory files)", out)
+
     def test_bad_arguments(self):
         s, p, sid = self.setup_store()
         code, _, err = self.run_cli("diff", "github.com/nope/nope")

@@ -48,7 +48,7 @@ def cmd_track(store: Store, a) -> int:
     for p in paths:
         sid = store.track(Path(p), sid=a.id)
         n = len(discover(Path(p).resolve(), store._kind(sid), store.config()))
-        print(f"tracking {sid}  <-  {Path(p).resolve()}  ({n} memory files)")
+        print(f"tracking {sid}  <-  {Path(p).resolve()}  ({n} memory file{'' if n == 1 else 's'})")
     return 0
 
 
