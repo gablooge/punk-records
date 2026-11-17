@@ -9,6 +9,8 @@
 from every project and machine in a single versioned store. Sync it over any git remote, or carry it
 across an air gap on a USB stick. Agents can read and write it live over MCP.
 
+![punk init, track, save, remember and context in a terminal](https://raw.githubusercontent.com/gablooge/punk-records/main/docs/demo.gif)
+
 > On [Egghead](https://onepiece.fandom.com/wiki/Egghead), Dr.
 > [Vegapunk](https://onepiece.fandom.com/wiki/Vegapunk) keeps one shared brain, the
 > [Punk Records](https://onepiece.fandom.com/wiki/Punk_Records). His satellites each go off

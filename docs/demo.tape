@@ -3,8 +3,8 @@
 #   pipx install punk-records   # or: pip install -e .  (so `punk` is on PATH)
 #   vhs docs/demo.tape          # writes docs/demo.gif
 #
-# It runs in throwaway HOME and PUNK_HOME folders, so none of your real memories, paths or
-# hostname appear in the recording.
+# It runs in throwaway HOME and PUNK_HOME folders under /tmp (deleted at the end), so none of your
+# real memories, paths, user-specific temp folders or hostname appear in the recording.
 
 Output docs/demo.gif
 
@@ -16,7 +16,7 @@ Set Padding 20
 Set TypingSpeed 45ms
 
 Hide
-Type 'export HOME=$(mktemp -d) PUNK_HOME=$(mktemp -d)/store PS1="$ "'
+Type 'export TMPDIR=/tmp HOME=$(mktemp -d /tmp/tmp.XXXX) PUNK_HOME=$(mktemp -d /tmp/tmp.XXXX)/store PS1="$ "'
 Enter
 Type 'mkdir -p ~/app && cd ~/app && git init -q && git remote add origin git@github.com:you/app.git'
 Enter
@@ -28,11 +28,11 @@ Show
 
 Type 'punk init --machine demo'
 Enter
-Sleep 1.5s
+Sleep 4s
 
 Type 'punk track .'
 Enter
-Sleep 1.5s
+Sleep 2.5s
 
 Type 'punk save'
 Enter
@@ -49,3 +49,7 @@ Sleep 2s
 Type 'punk context .'
 Enter
 Sleep 3s
+
+Hide
+Type 'rm -rf "$HOME" "$(dirname "$PUNK_HOME")"'
+Enter
