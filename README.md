@@ -98,19 +98,80 @@ punk import /media/usb/records.bundle     # on the air-gapped side (and back aga
 A bundle is a standard `git bundle` file. It carries full history and can be verified on arrival, and
 imports merge the same way online pulls do.
 
-### Let agents use it live (MCP)
+## Use it with your AI tools
 
-There is no server to keep running. Your agent starts `punk mcp` when a session begins and talks to
-it over stdin/stdout. Run `punk init` once first, then register it:
+### Let your agent set it up
+
+Paste one of these into Claude Code, Cursor, Codex or any agent that can run shell commands:
+
+> Install https://pypi.org/project/punk-records with pipx, run `punk init`, track this repo with
+> `punk track .`, save, and register its MCP server for Claude Code for all my projects
+> (`claude mcp add --scope user punk-records -- punk mcp`). Then run `punk scan` and tell me which
+> memory files it found.
+
+> I'm setting up a new laptop. Use https://pypi.org/project/punk-records to bring back my agent
+> memories: `punk init git@github.com:me/my-punk-records.git`, then track every repo under ~/code
+> and run `punk sync`.
+
+> Use punk-records (https://pypi.org/project/punk-records) to keep this project's CLAUDE.md and
+> AGENTS.md in sync across my machines automatically: run `punk install-hooks`.
+
+### Claude Code
 
 ```bash
 claude mcp add --scope user punk-records -- punk mcp   # all projects; without --scope: this project only
+punk install-hooks                                     # restore at session start, save + sync at the end
 ```
 
-Any MCP client works the same way (`"command": "punk", "args": ["mcp"]`). If the client cannot find
-`punk`, give it the full path from `which punk`. Tools offered:
-`get_context`, `search_memories`, `read_memory`, `list_memories`, `list_satellites`,
-`append_memory` (writes to the store, commits, and updates the local file), and `sync`.
+There is no server to keep running: Claude Code starts `punk mcp` when a session begins and talks to
+it over stdin/stdout. Run `punk init` once first. If `punk` is not found, use the full path from
+`which punk`.
+
+### Cursor, Codex and other MCP clients
+
+Cursor: add to `~/.cursor/mcp.json` (all projects) or `.cursor/mcp.json` (one project):
+
+```json
+{ "mcpServers": { "punk-records": { "command": "punk", "args": ["mcp"] } } }
+```
+
+Codex (CLI, IDE extension and ChatGPT desktop share this):
+
+```bash
+codex mcp add punk-records -- punk mcp     # or [mcp_servers.punk-records] in ~/.codex/config.toml
+```
+
+Any other MCP client works the same way: a stdio server with `"command": "punk"` and
+`"args": ["mcp"]`.
+
+### Things to ask your agent
+
+| You say | The agent uses |
+|---|---|
+| "Before you start, check punk records for what I already know about this repo." | `get_context` |
+| "Search punk records across all my projects: how did I set up GitHub Actions caching?" | `search_memories` |
+| "Which projects do I have memories for?" | `list_satellites`, `list_memories` |
+| "Show me the napkin for github.com/me/api." | `read_memory` |
+| "Remember in punk records: integration tests need Docker running." | `append_memory` |
+| "Before we finish, save the gotchas you hit today to this project's CLAUDE.md in punk records." | `append_memory` |
+| "Sync punk records." | `sync` |
+
+`append_memory` writes to the store, commits, and updates the local file. Secrets are refused, and it
+only writes memory files (CLAUDE.md, AGENTS.md, napkins, rules).
+
+### AI tools without MCP
+
+ChatGPT, Claude.ai, Gemini on the web or a local model can still use your memories as plain text:
+
+```bash
+punk context . | pbcopy          # macOS; on Linux: | xclip -selection clipboard
+punk context ~/code/api > notes.md
+```
+
+Then start the conversation with something like:
+
+> Here are my notes for this project (global preferences first, then project rules). Follow them,
+> and tell me if anything you do contradicts them.
 
 ### Sync automatically with Claude Code
 
