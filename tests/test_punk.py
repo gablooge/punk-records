@@ -1508,5 +1508,171 @@ class TestEncryption(Base):
         self.assertEqual(run("encrypt", "add-recipient", "nope")[0], 2)
 
 
+MODERN = {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "1"},
+          "io.modelcontextprotocol/clientCapabilities": {}}
+
+
+class TestMCPProtocol(Base):
+    def setUp(self):
+        super().setUp()
+        self.store = Store(self.tmp / "s")
+        self.store.init(track_global=False)
+        self.p = self.project("app")
+        (self.p / "CLAUDE.md").write_text("# rules\n- tabs\n")
+        self.sid = self.store.track(self.p)
+        self.store.save()
+
+    def rpc(self, method, params=None, modern=False, allow_sync=False):
+        params = dict(params or {})
+        if modern:
+            params["_meta"] = dict(MODERN)
+        return handle(self.store, {"jsonrpc": "2.0", "id": 7, "method": method, "params": params},
+                      allow_sync=allow_sync)
+
+    def tool(self, name, **args):
+        r = self.rpc("tools/call", {"name": name, "arguments": args})["result"]
+        return [c["text"] for c in r["content"]], r["isError"]
+
+    def test_legacy_initialize_negotiates_a_supported_version(self):
+        r = self.rpc("initialize", {"protocolVersion": "2025-06-18"})["result"]
+        self.assertEqual(r["protocolVersion"], "2025-06-18")
+        self.assertEqual(set(r["capabilities"]), {"tools", "resources", "prompts"})
+        r = self.rpc("initialize", {"protocolVersion": "1999-01-01"})["result"]
+        self.assertEqual(r["protocolVersion"], "2025-11-25")  # newest legacy version, not an echo
+
+    def test_modern_discover_and_version_checks(self):
+        r = self.rpc("server/discover", modern=True)["result"]
+        self.assertEqual(r["resultType"], "complete")
+        self.assertEqual(r["supportedVersions"], ["2026-07-28"])
+        self.assertEqual(r["_meta"]["io.modelcontextprotocol/serverInfo"]["name"], "punk-records")
+        self.assertIn("prompts", r["capabilities"])
+        r = self.rpc("tools/list", modern=True)["result"]
+        self.assertEqual(r["resultType"], "complete")
+        bad = handle(self.store, {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {"_meta": {
+            **MODERN, "io.modelcontextprotocol/protocolVersion": "2099-01-01"}}})
+        self.assertEqual(bad["error"]["code"], -32022)
+        self.assertEqual(bad["error"]["data"], {"supported": ["2026-07-28"], "requested": "2099-01-01"})
+        meta = dict(MODERN)
+        del meta["io.modelcontextprotocol/clientCapabilities"]
+        bad = handle(self.store, {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {"_meta": meta}})
+        self.assertEqual(bad["error"]["code"], -32602)
+
+    def test_resources_list_and_read(self):
+        (self.store.records / self.sid / ".claude").mkdir()
+        (self.store.records / self.sid / ".claude" / "napkin.md").write_text("napkin\n")
+        self.store.commit("napkin")
+        res = self.rpc("resources/list")["result"]["resources"]
+        uris = {r["name"]: r["uri"] for r in res}
+        self.assertEqual(uris[f"{self.sid}/CLAUDE.md"], "punk-records:///github.com%2Fme%2Fapp/CLAUDE.md")
+        self.assertEqual(uris[f"{self.sid}/.claude/napkin.md"],
+                         "punk-records:///github.com%2Fme%2Fapp/.claude/napkin.md")
+        self.assertEqual({r["mimeType"] for r in res}, {"text/markdown"})
+        c = self.rpc("resources/read", {"uri": uris[f"{self.sid}/CLAUDE.md"]})["result"]["contents"]
+        self.assertEqual(c, [{"uri": uris[f"{self.sid}/CLAUDE.md"], "mimeType": "text/markdown",
+                              "text": "# rules\n- tabs\n"}])
+        self.assertEqual(self.rpc("resources/read", {"uri": "punk-records:///github.com%2Fme%2Fapp/nope.md"})
+                         ["error"]["code"], -32002)  # legacy not-found code
+        self.assertEqual(self.rpc("resources/read", {"uri": "punk-records:///github.com%2Fme%2Fapp/nope.md"},
+                                  modern=True)["error"]["code"], -32602)
+        for evil in ("punk-records:///github.com%2Fme%2Fapp/../../../etc/passwd",
+                     "punk-records:///..%2F..%2Fetc/passwd", "file:///etc/passwd",
+                     "punk-records:///github.com%2Fme%2Fapp/%2E%2E/%2E%2E/punk-state.json"):
+            self.assertIn("error", self.rpc("resources/read", {"uri": evil}), evil)
+
+    def test_resource_uris_reject_path_tricks_on_their_own(self):
+        from punk_records.mcp import parse_uri, resource_uri
+        self.assertEqual(parse_uri(resource_uri("github.com/me/app", ".claude/napkin.md")),
+                         ("github.com/me/app", ".claude/napkin.md"))
+        for evil in ("punk-records:///github.com%2Fme%2Fapp/../x.md", "punk-records:///github.com%2Fme%2Fapp/a/%2E%2E/x.md",
+                     "punk-records:///..%2Fsecret/CLAUDE.md", "punk-records:///github.com%2Fme%2Fapp//etc/passwd",
+                     "punk-records://host/sid/CLAUDE.md", "punk-records:///sid", "https://x/CLAUDE.md"):
+            with self.assertRaises(PunkError, msg=evil):
+                parse_uri(evil)
+
+    def test_resources_are_paged(self):
+        from unittest import mock
+        for name in ("AGENTS.md", "GEMINI.md"):
+            (self.store.records / self.sid / name).write_text("x\n")
+        self.store.commit("more")
+        with mock.patch("punk_records.mcp.PAGE_SIZE", 2):
+            first = self.rpc("resources/list")["result"]
+            second = self.rpc("resources/list", {"cursor": first["nextCursor"]})["result"]
+        self.assertEqual(len(first["resources"]), 2)
+        self.assertEqual(len(second["resources"]), 1)
+        self.assertNotIn("nextCursor", second)
+        self.assertIn("error", self.rpc("resources/list", {"cursor": "not-a-cursor"}))
+        self.assertIn("error", self.rpc("resources/list", {"cursor": "-1"}))
+
+    def test_context_prompt(self):
+        prompts = self.rpc("prompts/list")["result"]["prompts"]
+        self.assertEqual([p["name"] for p in prompts], ["punk-context"])
+        r = self.rpc("prompts/get", {"name": "punk-context", "arguments": {"cwd": str(self.p)}})["result"]
+        self.assertEqual(r["messages"][0]["role"], "user")
+        self.assertIn("- tabs", r["messages"][0]["content"]["text"])
+        os.environ["CLAUDE_PROJECT_DIR"] = str(self.p)  # what Claude Code sets for stdio servers
+        r = self.rpc("prompts/get", {"name": "punk-context"})["result"]
+        self.assertIn("- tabs", r["messages"][0]["content"]["text"])
+        text, err = self.tool("get_context")
+        self.assertFalse(err)
+        self.assertIn("- tabs", text[0])
+        self.assertEqual(self.rpc("prompts/get", {"name": "nope"})["error"]["code"], -32602)
+
+    def test_write_memory_with_conflict_checks(self):
+        text, err = self.tool("read_memory", satellite=self.sid, path="CLAUDE.md")
+        self.assertFalse(err)
+        self.assertEqual(text[0], "# rules\n- tabs\n")
+        base = text[1].split("sha256=")[1].split(";")[0]
+        # existing file without base: refused
+        text, err = self.tool("write_memory", satellite=self.sid, path="CLAUDE.md", content="x\n")
+        self.assertTrue(err)
+        self.assertIn("read_memory", text[0])
+        # correct base: written to the store and the project
+        text, err = self.tool("write_memory", satellite=self.sid, path="CLAUDE.md",
+                              content="# rules\n- spaces\n", base_sha256=base)
+        self.assertFalse(err, text)
+        self.assertEqual((self.p / "CLAUDE.md").read_text(), "# rules\n- spaces\n")
+        # the same (now stale) base again: conflict, nothing changed
+        text, err = self.tool("write_memory", satellite=self.sid, path="CLAUDE.md", content="y\n", base_sha256=base)
+        self.assertTrue(err)
+        self.assertIn("changed", text[0])
+        self.assertEqual((self.p / "CLAUDE.md").read_text(), "# rules\n- spaces\n")
+        # a new file needs no base
+        text, err = self.tool("write_memory", satellite=self.sid, path="napkin.md", content="new\n")
+        self.assertFalse(err, text)
+        self.assertEqual((self.p / "napkin.md").read_text(), "new\n")
+        # secrets and non-memory paths are refused
+        self.assertTrue(self.tool("write_memory", satellite=self.sid, path="AGENTS.md",
+                                  content="key ghp_" + "a" * 36 + "\n")[1])
+        self.assertTrue(self.tool("write_memory", satellite=self.sid, path="run.sh", content="x")[1])
+
+    def test_write_memory_refuses_over_unsaved_local_edits(self):
+        base = self.tool("read_memory", satellite=self.sid, path="CLAUDE.md")[0][1].split("sha256=")[1].split(";")[0]
+        (self.p / "CLAUDE.md").write_text("# rules\n- tabs\n- my unsaved edit\n")
+        text, err = self.tool("write_memory", satellite=self.sid, path="CLAUDE.md", content="z\n", base_sha256=base)
+        self.assertTrue(err)
+        self.assertIn("unsaved", text[0])
+        self.assertEqual((self.p / "CLAUDE.md").read_text(), "# rules\n- tabs\n- my unsaved edit\n")
+
+    def test_write_memory_keeps_crlf_files_crlf(self):
+        (self.p / "CLAUDE.md").write_bytes(b"a\r\nb\r\n")
+        self.store.save()
+        base = self.tool("read_memory", satellite=self.sid, path="CLAUDE.md")[0][1].split("sha256=")[1].split(";")[0]
+        self.tool("write_memory", satellite=self.sid, path="CLAUDE.md", content="a\nc\n", base_sha256=base)
+        self.assertEqual((self.p / "CLAUDE.md").read_bytes(), b"a\r\nc\r\n")
+
+    def test_sync_is_opt_in(self):
+        names = [t["name"] for t in self.rpc("tools/list")["result"]["tools"]]
+        self.assertNotIn("sync", names)
+        self.assertIn("write_memory", names)
+        text, err = self.tool("sync")
+        self.assertTrue(err)
+        self.assertIn("--allow-sync", text[0])
+        names = [t["name"] for t in self.rpc("tools/list", allow_sync=True)["result"]["tools"]]
+        self.assertIn("sync", names)
+        r = self.rpc("tools/call", {"name": "sync", "arguments": {}}, allow_sync=True)["result"]
+        self.assertFalse(r["isError"])
+
+
 if __name__ == "__main__":
     unittest.main()

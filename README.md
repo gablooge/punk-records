@@ -172,10 +172,19 @@ Any other MCP client works the same way: a stdio server with `"command": "punk"`
 | "Show me the napkin for github.com/me/api." | `read_memory` |
 | "Remember in punk records: integration tests need Docker running." | `append_memory` |
 | "Before we finish, save the gotchas you hit today to this project's CLAUDE.md in punk records." | `append_memory` |
-| "Sync punk records." | `sync` |
+| "Tidy up this project's CLAUDE.md in punk records: merge duplicates and group by topic." | `read_memory`, `write_memory` |
+| "Sync punk records." | `sync` (only with `punk mcp --allow-sync`) |
 
-`append_memory` writes to the store, commits, and updates the local file. Secrets are refused, and it
-only writes memory files (CLAUDE.md, AGENTS.md, napkins, rules).
+`append_memory` and `write_memory` write to the store, commit, and update the local file. Secrets are
+refused, and only memory files (CLAUDE.md, AGENTS.md, napkins, rules) are written. `write_memory`
+replaces a whole file, so it needs the sha256 that `read_memory` reports and is refused if the file
+changed since, or if you have unsaved edits on this machine. `sync` reaches the network and is off
+unless you register the server as `punk mcp --allow-sync`.
+
+Clients that show MCP resources and prompts also get every memory file as a resource
+(`punk-records:///<satellite>/<path>`) and a `punk-context` prompt that starts a conversation with
+your global and project memories. The server speaks both the current MCP revision (2026-07-28) and
+older `initialize`-based clients.
 
 ### AI tools without MCP
 
