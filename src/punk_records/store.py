@@ -408,6 +408,25 @@ class Store:
                 raise PunkError(f"{i!r} is not tracked on this machine (see `punk list`)")
         return ids
 
+    def _moved(self, sid: str, root: Path) -> str:
+        """Why `root` is no longer this satellite's folder ("" if it still is).
+
+        A project tracked with a git remote has moved when its old path is no longer a clone of that
+        remote (an empty folder left behind, or another repo). Saving from there would delete every
+        memory from the store, and restoring would write them into the wrong folder.
+        """
+        if self._kind(sid) == "global":
+            return ""
+        remote = self.satellites().get(sid, {}).get("remote")
+        want = normalize_remote(remote) if isinstance(remote, str) else None
+        if not want:
+            return ""
+        r = _git_run(["-C", str(root), "config", "--get", "remote.origin.url"])
+        have = normalize_remote(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
+        if have == want:
+            return ""
+        return f"{root} is no longer a clone of {remote}; moved? `punk track <new path>`"
+
     def _kind(self, sid: str) -> str:
         return "global" if sid == GLOBAL_ID else self.satellites().get(sid, {}).get("kind", "project")
 
@@ -459,6 +478,10 @@ class Store:
             root = Path(state["paths"][sid])
             if not root.is_dir():
                 actions.append(Action("missing", sid, note=f"{root} not found on this machine"))
+                continue
+            moved = self._moved(sid, root)
+            if moved:
+                actions.append(Action("missing", sid, note=moved))
                 continue
             kind = self._kind(sid)
             scanned = scan(root, kind, cfg)
@@ -625,6 +648,10 @@ class Store:
             root = Path(state["paths"][sid])
             if not root.is_dir():
                 actions.append(Action("missing", sid, note=f"{root} not found on this machine"))
+                continue
+            moved = self._moved(sid, root)
+            if moved:
+                actions.append(Action("missing", sid, note=moved))
                 continue
             kind = self._kind(sid)
             synced = state["synced"].setdefault(sid, {})

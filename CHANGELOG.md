@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A moved project no longer loses its memories: when the old folder is no longer a clone of the
+  satellite's git remote (an empty folder left behind, or another repo), `save` and `restore` skip
+  it as `missing` and point to `punk track <new path>`, instead of deleting every memory from the store
 - `punk status --json` and `punk list --json` (satellites, local paths, memory files, team
   subscriptions) for editor integrations; the JSON carries `"version": 1`
 - `punk show @team/<satellite> <path>` prints a memory from a subscribed team store
