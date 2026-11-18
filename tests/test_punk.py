@@ -308,7 +308,31 @@ class TestCLIEncoding(Base):
         r = subprocess.run([sys.executable, "-m", "punk_records", "--home", str(s.root), "show", sid, "CLAUDE.md"],
                            capture_output=True, env=env)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.replace(b"\r\n", b"\n"), "- \u2713 \u65e5\u672c\n".encode())
+        self.assertEqual(r.stdout, "- \u2713 \u65e5\u672c\n".encode())
+
+    def _show_through_windows_pipe(self, *args) -> bytes:
+        """`punk show` into a stdout that turns "\\n" into "\\r\\n", like a Windows pipe does."""
+        import io
+        from contextlib import redirect_stdout
+        raw = io.BytesIO()
+        out = io.TextIOWrapper(raw, encoding="utf-8", newline="\r\n", write_through=True)
+        with redirect_stdout(out):
+            code = cli.main(["--home", str(self.tmp / "s"), "show", *args])
+        out.flush()
+        self.assertEqual(code, 0)
+        return raw.getvalue()
+
+    def test_show_writes_the_stored_bytes(self):
+        s = Store(self.tmp / "s")
+        s.init(track_global=False)
+        p = self.project("app")
+        (p / "CLAUDE.md").write_bytes("v1\n- \u2713\n".encode())
+        (p / "AGENTS.md").write_bytes(b"crlf\r\nfile\r\n")
+        sid = s.track(p)
+        s.save()
+        self.assertEqual(self._show_through_windows_pipe(sid, "CLAUDE.md"), "v1\n- \u2713\n".encode())
+        self.assertEqual(self._show_through_windows_pipe(sid, "AGENTS.md"), b"crlf\r\nfile\r\n")
+        self.assertEqual(s.read(sid, "AGENTS.md"), "crlf\r\nfile\r\n")
 
 
 class TestPortability(unittest.TestCase):
