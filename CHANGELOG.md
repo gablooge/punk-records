@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 - 2026-11-21
+
+JSON output for editor integrations, Claude Code auto memory, and safer moves.
 
 - A moved project no longer loses its memories: when the old folder is no longer a clone of the
   satellite's git remote (an empty folder left behind, or another repo), `save` and `restore` skip
@@ -13,6 +15,7 @@
 - `punk show @team/<satellite> <path>` prints a memory from a subscribed team store
 - `punk show <satellite> <path>` writes the stored bytes when piped: no more `\r\n` for every `\n`
   on Windows, and files saved with `\r\n` keep them (also in MCP `read_memory`)
+- README: using punk from VS Code (the Claude Code extension, and Copilot agent mode over MCP)
 
 ## 0.3.1 - 2026-11-17
 
