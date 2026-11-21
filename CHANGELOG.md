@@ -7,6 +7,9 @@
   it as `missing` and point to `punk track <new path>`, instead of deleting every memory from the store
 - `punk status --json` and `punk list --json` (satellites, local paths, memory files, team
   subscriptions) for editor integrations; the JSON carries `"version": 1`
+- Claude Code auto memory (`~/.claude/projects/<project>/memory/*.md`) is saved with its project as
+  `@claude-memory/...` and restored into the right folder on every machine, whatever the checkout
+  path; worktrees share the main checkout's. Opt out with `"exclude": ["@claude-memory/*"]`
 - `punk show @team/<satellite> <path>` prints a memory from a subscribed team store
 - `punk show <satellite> <path>` writes the stored bytes when piped: no more `\r\n` for every `\n`
   on Windows, and files saved with `\r\n` keep them (also in MCP `read_memory`)

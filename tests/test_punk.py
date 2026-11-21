@@ -321,6 +321,104 @@ class TestSync(Base):
         self.assertIn("short answers", s.context(self.tmp))
 
 
+class TestClaudeAutoMemory(Base):
+    """Claude Code's auto memory lives outside the project, keyed by the repo's path on this machine."""
+
+    def auto_dir(self, repo: Path) -> Path:
+        key = "".join(c if c.isascii() and c.isalnum() else "-" for c in str(repo.resolve()))
+        return Path(os.environ["HOME"]) / ".claude" / "projects" / key / "memory"
+
+    def test_saved_from_one_path_and_restored_at_another(self):
+        remote = self.tmp / "remote.git"
+        git("init", "-q", "--bare", str(remote), cwd=self.tmp)
+        a = Store(self.tmp / "a-store")
+        a.init(machine="a", track_global=False)
+        git("remote", "add", "origin", str(remote), cwd=a.root)
+        pa = self.project("a/app")
+        (pa / "CLAUDE.md").write_text("rules\n")
+        mem = self.auto_dir(pa)
+        mem.mkdir(parents=True)
+        (mem / "MEMORY.md").write_text("- [Role](user_role.md) - who I am\n")
+        (mem / "user_role.md").write_text("backend dev\n")
+        (mem / "notes.txt").write_text("not a memory\n")
+        sid = a.track(pa)
+        self.assertEqual(discover(pa), ["@claude-memory/MEMORY.md", "@claude-memory/user_role.md",
+                                        "CLAUDE.md"])
+        a.sync()
+        self.assertEqual((a.records / sid / "@claude-memory" / "user_role.md").read_text(), "backend dev\n")
+
+        b = Store(self.tmp / "b-store")
+        b.init(str(remote), machine="b", track_global=False)
+        pb = self.project("b/elsewhere/app")
+        b.track(pb)
+        b.sync()
+        self.assertEqual((self.auto_dir(pb) / "user_role.md").read_text(), "backend dev\n")
+        self.assertFalse((pb / "@claude-memory").exists())
+
+        (self.auto_dir(pb) / "user_role.md").write_text("backend dev, likes tests\n")
+        self.assertEqual([d.rel for d in b.diff()], ["@claude-memory/user_role.md"])
+        b.sync()
+        a.sync()
+        self.assertEqual((mem / "user_role.md").read_text(), "backend dev, likes tests\n")
+        (mem / "user_role.md").unlink()
+        self.assertIn(("delete", "@claude-memory/user_role.md"), [(x.kind, x.rel) for x in a.save()])
+
+    def test_worktrees_share_the_main_checkout_memory(self):
+        p = self.project("app")
+        (p / "CLAUDE.md").write_text("rules\n")
+        git("add", "-A", cwd=p)
+        git("commit", "-qm", "init", cwd=p)
+        wt = self.tmp / "app-wt"
+        git("worktree", "add", "-q", str(wt), cwd=p)
+        self.auto_dir(p).mkdir(parents=True)
+        (self.auto_dir(p) / "MEMORY.md").write_text("shared\n")
+        self.assertIn("@claude-memory/MEMORY.md", discover(wt))
+
+    def test_exclude_opts_out_and_secrets_are_blocked(self):
+        s = Store(self.tmp / "s")
+        s.init(track_global=False)
+        p = self.project("app")
+        mem = self.auto_dir(p)
+        mem.mkdir(parents=True)
+        (mem / "MEMORY.md").write_text("token ghp_" + "a" * 36 + "\n")
+        sid = s.track(p)
+        self.assertEqual([(x.kind, x.rel) for x in s.save()], [("blocked", "@claude-memory/MEMORY.md")])
+        (s.root / "punk.json").write_text(json.dumps({"exclude": ["@claude-memory/*"]}))
+        self.assertEqual(s.save(), [])
+        self.assertFalse((s.records / sid / "@claude-memory").exists())
+
+    def test_claude_config_dir_is_honoured(self):
+        p = self.project("app")
+        cfg = self.tmp / "claude-cfg"
+        os.environ["CLAUDE_CONFIG_DIR"] = str(cfg)
+        mem = cfg / "projects" / self.auto_dir(p).parent.name / "memory"
+        mem.mkdir(parents=True)
+        (mem / "MEMORY.md").write_text("x\n")
+        self.assertEqual(discover(p), ["@claude-memory/MEMORY.md"])
+
+    def test_watch_sees_auto_memory_edits(self):
+        from punk_records.watch import Watcher
+        s = Store(self.tmp / "s")
+        s.init(track_global=False)
+        p = self.project("app")
+        mem = self.auto_dir(p)
+        mem.mkdir(parents=True)
+        (mem / "MEMORY.md").write_text("one\n")
+        sid = s.track(p)
+        w = Watcher(s, out=lambda _: None)
+        before = w.fingerprint()
+        (mem / "MEMORY.md").write_text("one, two\n")
+        after = w.fingerprint(full=False)
+        self.assertIn("@claude-memory/MEMORY.md", before[sid])
+        self.assertNotEqual(before[sid], after[sid])
+
+    def test_a_project_folder_named_like_the_prefix_is_not_auto_memory(self):
+        p = self.project("app")
+        (p / "@claude-memory").mkdir()
+        (p / "@claude-memory" / "MEMORY.md").write_text("x\n")
+        self.assertEqual(discover(p), [])
+
+
 class TestCLIEncoding(Base):
     def test_piped_output_is_utf8(self):
         s = Store(self.tmp / "s")

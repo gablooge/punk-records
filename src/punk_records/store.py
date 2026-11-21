@@ -30,7 +30,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 from . import secrets
-from .discover import followed_target, is_memory_path, scan
+from .discover import AUTO_MEMORY, auto_memory_dir, followed_target, is_memory_path, local_path, scan
 
 GLOBAL_ID = "global"
 
@@ -190,6 +190,14 @@ def _safe_target(root: Path, rel: str) -> Path:
     if resolved_root not in target.resolve().parents:
         raise PunkError(f"refusing to write outside {root}: {rel}")
     return target
+
+
+def _local_target(root: Path, rel: str) -> Path:
+    """`_safe_target` for a satellite path on this machine: auto memory stays inside its own folder."""
+    head, _, rest = rel.partition("/")
+    if head == AUTO_MEMORY and rest:
+        return _safe_target(auto_memory_dir(root), rest)
+    return _safe_target(root, rel)
 
 
 def _inside(root: Path, rel: str) -> bool:
@@ -490,7 +498,7 @@ class Store:
             synced = state["synced"].setdefault(sid, {})
             dest = self.records / sid
             for rel in found:
-                data = (root / rel).read_bytes()
+                data = local_path(root, rel).read_bytes()
                 loc = sha(data)
                 st = synced.get(rel)
                 target = dest / rel
@@ -665,7 +673,7 @@ class Store:
                     continue
                 rdata = (self.records / sid / rel).read_bytes()
                 rec = sha(rdata)
-                dst = root / rel
+                dst = local_path(root, rel)
                 # never write through a link, except a global dotfile link (see followed_target)
                 if dst.is_symlink() and not (kind == "global" and followed_target(root, dst, cfg)):
                     st = synced.get(rel)
@@ -683,7 +691,7 @@ class Store:
                         synced[rel] = {"local": rec, "record": rec}
                         state["links"][sid].pop(rel, None)
                     continue
-                dst = _safe_target(root, rel)
+                dst = _local_target(root, rel)
                 loc = sha(dst.read_bytes()) if dst.is_file() else None
                 st = synced.get(rel)
                 if loc == rec:
@@ -708,7 +716,7 @@ class Store:
                     dst.write_bytes(rdata)
                     synced[rel] = {"local": rec, "record": rec}
             for rel in sorted(set(synced) - set(recfiles) - set(stored_links)):
-                dst = root / rel
+                dst = local_path(root, rel)
                 if dst.is_symlink() and not (kind == "global" and followed_target(root, dst, cfg)):
                     continue  # became a symlink here; `punk save` records it
                 if not dst.is_file():
@@ -808,7 +816,7 @@ class Store:
                                             f"  store: {'-> ' + there if there else '(none)'}\n"
                                             f"  local: {'-> ' + here if here else '(none)'}\n"))
                 a = (self.records / sid / r).read_bytes() if r in stored else None
-                b = (root / r).read_bytes() if r in local else None
+                b = local_path(root, r).read_bytes() if r in local else None
                 if a == b:
                     continue
                 if a is not None and b is not None and \

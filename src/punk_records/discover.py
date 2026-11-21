@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import fnmatch
+import functools
 import os
 import stat
+import subprocess
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
@@ -62,11 +64,48 @@ FORBIDDEN_SEGMENTS = {".git", ".hg", ".svn", ".."}
 
 MAX_BYTES = 1_000_000
 
+# Claude Code's auto memory for a project lives outside it, in
+# <CLAUDE_CONFIG_DIR or ~/.claude>/projects/<repo path, non-alphanumerics as "-">/memory/, keyed by
+# the repo's path on this machine. Stored as <satellite>/@claude-memory/<file>, so another machine
+# (or another checkout path) restores it into its own folder.
+AUTO_MEMORY = "@claude-memory"
+
 # Global (dotfiles-style) symlinks are never followed into these directories.
 SENSITIVE_SEGMENTS = {".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".password-store",
                       "gcloud", ".netrc", ".git-credentials"}
 # ...and only to files that look like memories: these suffixes, or the link's own file name.
 FOLLOW_SUFFIXES = {".md", ".mdc", ".markdown", ".txt"}
+
+
+@functools.lru_cache(maxsize=256)
+def _repo_root(root: str) -> str:
+    """The main checkout a folder belongs to (worktrees share it), or the folder itself."""
+    try:
+        r = subprocess.run(["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                           capture_output=True, text=True)
+    except OSError:
+        return root
+    common = r.stdout.strip()
+    if r.returncode != 0 or not common:
+        return root
+    common_path = Path(common)
+    return str(common_path.parent if common_path.name == ".git" else Path(root))
+
+
+def auto_memory_dir(root: Path) -> Path:
+    """Where Claude Code keeps auto memory for the project at `root` on this machine."""
+    base = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    repo = _repo_root(str(Path(root).resolve()))
+    key = "".join(c if c.isascii() and c.isalnum() else "-" for c in repo)
+    return base / "projects" / key / "memory"
+
+
+def local_path(root: Path, rel: str) -> Path:
+    """The file on this machine for a satellite-relative memory path (auto memory lives elsewhere)."""
+    head, _, rest = rel.partition("/")
+    if head == AUTO_MEMORY and rest:
+        return auto_memory_dir(root) / rest
+    return Path(root) / rel
 
 
 def _globs(kind: str, config: dict) -> list[str]:
@@ -82,6 +121,8 @@ def is_memory_path(rel: str, kind: str, config: dict | None = None) -> bool:
         return False
     if any(fnmatch.fnmatch(rel, pat) for pat in config.get("exclude", [])):
         return False
+    if kind != "global" and p.parts[0] == AUTO_MEMORY:
+        return len(p.parts) > 1 and p.suffix == ".md"
     if kind != "global":
         if any(s in PRUNE for s in p.parts[:-1]):
             return False
@@ -195,12 +236,24 @@ def scan(root: Path, kind: str = "project", config: dict | None = None) -> Scan:
 
     def walk(start: Path) -> None:
         for dirpath, dirnames, filenames in os.walk(start):
-            dirnames[:] = [d for d in dirnames if d not in PRUNE]
+            dirnames[:] = [d for d in dirnames if d not in PRUNE
+                           and not (d == AUTO_MEMORY and Path(dirpath) == root)]
             for name in filenames:
                 consider(Path(dirpath) / name)
 
     if kind != "global":
         walk(root)  # basenames anywhere + project globs
+        auto = auto_memory_dir(root)
+        for dirpath, _, filenames in os.walk(auto) if auto.is_dir() else ():
+            for name in filenames:
+                full = Path(dirpath) / name
+                rel = f"{AUTO_MEMORY}/{full.relative_to(auto).as_posix()}"
+                if not is_memory_path(rel, kind, config):
+                    continue
+                if full.is_symlink():
+                    warnings.add((rel, "symlink in Claude Code auto memory; skipped"))
+                elif full.is_file() and _is_text(full):
+                    found.add(rel)
     else:
         roots = set()
         for pat in _globs(kind, config):
