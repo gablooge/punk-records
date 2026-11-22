@@ -1,0 +1,19 @@
+{
+  "name": "punk-records",
+  "version": "0.4.0",
+  "description": "Restores CLAUDE.md, AGENTS.md, napkins and rules when a session starts, saves and syncs them when it ends, and adds the punk-records MCP tools.",
+  "author": {
+    "name": "gablooge",
+    "url": "https://github.com/gablooge"
+  },
+  "homepage": "https://github.com/gablooge/punk-records",
+  "repository": "https://github.com/gablooge/punk-records",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "sync",
+    "mcp"
+  ]
+}

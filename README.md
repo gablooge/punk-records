@@ -158,10 +158,23 @@ Paste one of these into Claude Code, Cursor, Codex or any agent that can run she
 
 ### Claude Code
 
+The plugin sets up both the MCP server and the session hooks in one step (Claude Code 2.1.275 or
+newer; punk itself still comes from `pipx install punk-records`):
+
+```
+/plugin install punk-records --marketplace gablooge/punk-records
+```
+
+Or do the same by hand:
+
 ```bash
 claude mcp add --scope user punk-records -- punk mcp   # all projects; without --scope: this project only
 punk install-hooks                                     # restore at session start, save + sync at the end
 ```
+
+Use one or the other: with both, memories are restored and saved twice. The plugin's `setup` skill
+(`/punk-records:setup`) walks through installing punk, `punk init` and tracking the project, and
+removes hooks left by `punk install-hooks`.
 
 There is no server to keep running: Claude Code starts `punk mcp` when a session begins and talks to
 it over stdin/stdout. Run `punk init` once first. If `punk` is not found, use the full path from

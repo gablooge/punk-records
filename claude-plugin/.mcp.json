@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "punk-records": {
+      "command": "punk",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Claude Code plugin: `/plugin install punk-records --marketplace gablooge/punk-records` adds the
+  MCP server and the session hooks in one step, plus a `setup` skill
 - README: the Punk Records VS Code extension (Marketplace and Open VSX)
 
 ## 0.4.0 - 2026-11-21

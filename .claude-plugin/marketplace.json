@@ -1,0 +1,15 @@
+{
+  "name": "punk-records",
+  "description": "Punk Records: your agents' memories across projects and machines",
+  "owner": {
+    "name": "gablooge",
+    "url": "https://github.com/gablooge"
+  },
+  "plugins": [
+    {
+      "name": "punk-records",
+      "source": "./claude-plugin",
+      "description": "Restores memories when a session starts, saves and syncs them when it ends, and adds the punk-records MCP tools. Needs punk 0.4.0+ (pipx install punk-records)."
+    }
+  ]
+}
