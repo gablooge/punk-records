@@ -481,6 +481,88 @@ class TestReadme(unittest.TestCase):
         self.assertEqual(relative, [])
 
 
+class TestStoreLock(Base):
+    """Several punk processes (cron agents, hooks, the MCP server) can write one store at once."""
+
+    def setUp(self):
+        super().setUp()
+        self.store = Store(self.tmp / "store")
+        self.store.init(machine="host", track_global=False)
+        app = self.project("app")
+        (app / "CLAUDE.md").write_text("# App\n")
+        self.sid = self.store.track(app)
+        self.store.save()
+        self.env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "PUNK_HOME": str(self.store.root)}
+
+    def punk(self, *args, env=None):
+        return subprocess.Popen([sys.executable, "-m", "punk_records", *args], env=env or self.env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    def test_parallel_writers_keep_every_change(self):
+        procs = [self.punk("remember", "-s", self.sid, f"lesson {i}") for i in range(8)]
+        results = [(p.wait(timeout=120), p.communicate()[1]) for p in procs]
+        self.assertEqual([code for code, _ in results], [0] * 8, results)
+        text = self.store.read(self.sid, "CLAUDE.md")
+        self.assertEqual(sorted(line for line in text.splitlines() if line.startswith("lesson")),
+                         sorted(f"lesson {i}" for i in range(8)))
+        fsck = subprocess.run(["git", "fsck", "--no-progress"], cwd=self.store.root, capture_output=True, text=True)
+        self.assertEqual(fsck.returncode, 0, fsck.stderr)
+        log = subprocess.run(["git", "log", "--format=%s"], cwd=self.store.root, capture_output=True, text=True,
+                             check=True).stdout
+        self.assertEqual(log.count(f"remember in {self.sid}/CLAUDE.md"), 8)
+
+    def test_waits_then_gives_up_with_a_clear_error(self):
+        with self.store.lock():
+            p = self.punk("remember", "-s", self.sid, "late", env={**self.env, "PUNK_LOCK_TIMEOUT": "0.5"})
+            code, err = p.wait(timeout=60), p.communicate()[1]
+        self.assertNotEqual(code, 0)
+        self.assertIn("another punk process is using the store", err)
+        self.assertNotIn("late", self.store.read(self.sid, "CLAUDE.md"))
+
+    def test_reentrant_in_one_process(self):
+        os.environ["PUNK_LOCK_TIMEOUT"] = "2"  # a lock that is not re-entrant fails fast here
+        with self.store.lock():
+            self.store.sync()  # takes the lock again, and calls save inside
+            self.store.append(self.sid, "CLAUDE.md", "inside")
+        self.assertIn("inside", self.store.read(self.sid, "CLAUDE.md"))
+
+    def test_a_crashed_holder_does_not_leave_it_locked(self):
+        # keep a reference to the lock: a dropped one is garbage collected, which unlocks
+        code = ("import os, sys; sys.path.insert(0, sys.argv[2]); from punk_records.store import Store; "
+                "s = Store(sys.argv[1]); held = s.lock(); held.__enter__(); os._exit(0)")
+        subprocess.run([sys.executable, "-c", code, str(self.store.root), str(ROOT / "src")], check=True, timeout=60)
+        p = self.punk("remember", "-s", self.sid, "after crash", env={**self.env, "PUNK_LOCK_TIMEOUT": "2"})
+        self.assertEqual(p.wait(timeout=60), 0, p.communicate()[1])
+
+    def test_a_hook_reports_a_busy_store(self):
+        from punk_records import hooks
+        os.environ.pop("PUNK_LOCK_TIMEOUT", None)
+        hooks.run(Store(self.tmp / "no-store"), "session-end", "{}")
+        self.assertEqual(os.environ["PUNK_LOCK_TIMEOUT"], str(hooks.TIMEOUT - 10))  # shorter than the hook
+        os.environ["PUNK_LOCK_TIMEOUT"] = "0.5"
+        app = self.store.load_state()["paths"][self.sid]
+        code = ("import sys, time; sys.path.insert(0, sys.argv[2]); from punk_records.store import Store; "
+                "s = Store(sys.argv[1]); held = s.lock(); held.__enter__(); print('held', flush=True); time.sleep(30)")
+        holder = subprocess.Popen([sys.executable, "-c", code, str(self.store.root), str(ROOT / "src")],
+                                  stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(holder.stdout.readline().strip(), "held")
+            code, out, err = hooks.run(self.store, "session-end", json.dumps({"cwd": app}))
+        finally:
+            holder.kill()
+            holder.communicate()
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("another punk process is using the store", err)
+
+    def test_lock_file_is_never_committed(self):
+        with self.store.lock():
+            pass
+        self.assertTrue((self.store.root / ".git" / "punk.lock").exists())
+        files = subprocess.run(["git", "ls-files"], cwd=self.store.root, capture_output=True, text=True,
+                               check=True).stdout.split()
+        self.assertFalse([f for f in files if "punk.lock" in f])
+
+
 class TestMCPRegistry(unittest.TestCase):
     """server.json lists punk in the MCP Registry; the registry rejects a version whose PyPI README
     lacks the matching `mcp-name:` line, and clients start it as `uvx punk-records mcp`."""

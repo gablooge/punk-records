@@ -152,6 +152,9 @@ def run(store: Store, action: str, stdin_text: str) -> tuple[int, str, str]:
     if not isinstance(payload, dict):
         payload = {}
     cwd = Path(payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    # Claude Code stops a hook after TIMEOUT seconds; wait for a busy store less than that, so a
+    # store held by another punk process is reported instead of the hook being killed silently.
+    os.environ.setdefault("PUNK_LOCK_TIMEOUT", str(TIMEOUT - 10))
     notes = []
     try:
         if not store.exists():

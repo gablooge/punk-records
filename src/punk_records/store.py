@@ -25,7 +25,10 @@ import socket
 import stat
 import subprocess
 import sys
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
@@ -41,6 +44,57 @@ GITATTRIBUTES = """\
 # keep both sides' lines instead of stopping on a merge conflict.
 records/** merge=union
 """
+
+# Seconds a command waits for another punk process to finish with the store (PUNK_LOCK_TIMEOUT).
+LOCK_TIMEOUT = 60.0
+LOCK_FILE = "punk.lock"  # in .git/, so it is never committed
+
+
+def _try_lock(fd: int) -> bool:
+    """Take an exclusive lock on the open file without waiting. False if another process holds it."""
+    if os.name == "nt":
+        import msvcrt
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+    import fcntl
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
+def _unlock(fd: int) -> None:
+    if os.name == "nt":
+        import msvcrt
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+def locked(method):
+    """Run a Store method that writes while holding the store lock (re-entrant within a process)."""
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self.lock():
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
+def locked_store(method):
+    """Like `locked`, for helpers (Team, Crypt) that hold the store as `self.store`."""
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self.store.lock():
+            return method(self, *args, **kwargs)
+    return wrapper
+
 
 # Git for Windows defaults to core.autocrlf=true; the store must never convert line endings.
 GIT_STORE_CONFIG = ("core.autocrlf", "false")
@@ -240,6 +294,42 @@ def _make_link(root: Path, rel: str, target: str) -> None:
 class Store:
     def __init__(self, root: Path | str | None = None):
         self.root = Path(root).expanduser() if root else default_home()
+        self._lock_depth = 0
+
+    @contextmanager
+    def lock(self):
+        """Hold `.git/punk.lock` so only one punk process writes the store at a time (agents run from
+        cron, hooks and the MCP server can overlap). Re-entrant: `sync` takes it and calls `save`.
+        Waits up to PUNK_LOCK_TIMEOUT seconds (default 60), then raises PunkError. The OS releases
+        the lock if the process dies, so a crash never leaves the store locked."""
+        if self._lock_depth or not (self.root / ".git").is_dir():
+            self._lock_depth += 1
+            try:
+                yield
+            finally:
+                self._lock_depth -= 1
+            return
+        try:
+            timeout = float(os.environ.get("PUNK_LOCK_TIMEOUT", LOCK_TIMEOUT))
+        except ValueError:
+            timeout = LOCK_TIMEOUT
+        fd = os.open(self.root / ".git" / LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            deadline = time.monotonic() + timeout
+            while not _try_lock(fd):
+                if time.monotonic() >= deadline:
+                    raise PunkError(f"another punk process is using the store at {self.root} "
+                                    f"(waited {timeout:g} s); try again when it has finished, "
+                                    f"or raise PUNK_LOCK_TIMEOUT")
+                time.sleep(0.1)
+            self._lock_depth = 1
+            try:
+                yield
+            finally:
+                self._lock_depth = 0
+                _unlock(fd)
+        finally:
+            os.close(fd)
 
     # ------------------------------------------------------------------ basics
     @property
@@ -358,6 +448,7 @@ class Store:
                 out[sid] = {}
         return out
 
+    @locked
     def track(self, path: Path, sid: str | None = None, kind: str = "project") -> str:
         self.require()
         path = Path(path).expanduser().resolve()
@@ -378,6 +469,7 @@ class Store:
         self.save_state(state)
         return sid
 
+    @locked
     def untrack(self, sid: str, purge: bool = False) -> None:
         state = self.load_state()
         if sid not in state["paths"] and sid not in self.satellites():
@@ -477,6 +569,7 @@ class Store:
         _write_text(path, json.dumps(meta, indent=2) + "\n")
 
     # ------------------------------------------------------------------- save
+    @locked
     def save(self, ids: list[str] | None = None, *, message: str | None = None, redact: bool = False,
              allow_secrets: bool = False, force: bool = False, dry_run: bool = False) -> list[Action]:
         """Copy local memory files into the store and commit."""
@@ -647,6 +740,7 @@ class Store:
         return actions
 
     # ---------------------------------------------------------------- restore
+    @locked
     def restore(self, ids: list[str] | None = None, *, force: bool = False, prune: bool = False,
                 dry_run: bool = False) -> list[Action]:
         """Write store memories back into local projects, never clobbering local edits."""
@@ -742,6 +836,7 @@ class Store:
             raise PunkError(f"could not merge {source} {ref}:\n{(r.stderr or r.stdout).strip()}\n"
                             f"Resolve by hand in {self.root} (it is a normal git repo).")
 
+    @locked
     def exchange(self, push: bool = True) -> bool:
         """Pull from the git remote (if it has our branch) and push to it. False if there is no remote."""
         from .crypt import Crypt
@@ -758,6 +853,7 @@ class Store:
             self.git("push", "-q", "-u", remote, branch)
         return True
 
+    @locked
     def sync(self, ids: list[str] | None = None, **save_kw) -> list[Action]:
         """save -> pull -> push -> restore. Works offline: it just saves and restores."""
         actions = self.save(ids, **save_kw)
@@ -774,6 +870,7 @@ class Store:
         self.git("bundle", "create", "-q", str(path), self.branch())
         return path
 
+    @locked
     def import_bundle(self, path: Path, **save_kw) -> list[Action]:
         self.require()
         path = Path(path).expanduser().resolve()
@@ -912,6 +1009,7 @@ class Store:
             raise PunkError(f"{rel} is not a memory path (e.g. CLAUDE.md, AGENTS.md, napkin.md)")
         return rel, _safe_target(self.records / sid, rel), local_root
 
+    @locked
     def write(self, sid: str, rel: str, content: str, base_sha256: str | None = None) -> tuple[str, str]:
         """Replace a memory file, refusing if it changed since the caller read it.
 
@@ -944,6 +1042,7 @@ class Store:
             self.restore([sid])
         return rel, sha(out)
 
+    @locked
     def append(self, sid: str, rel: str, text: str) -> str:
         """Add a note to a memory file in the store and propagate it locally.
 
