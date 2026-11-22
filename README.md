@@ -289,6 +289,29 @@ found by a full rescan every 30 seconds (`--rescan`). No file-system events, no 
 From the shell: `punk remember "- integration tests need docker running"` appends to the current
 project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
 
+### Agent fleets (cron, CI, schedulers)
+
+Agents that run unattended can keep what they learn between runs: one command before the run, one
+after.
+
+```bash
+punk --agent acme/support session start --project ~/agents/support   # pull, then restore
+/opt/agent-runner/run.sh support                                      # the agent itself
+punk --agent acme/support session end --project ~/agents/support     # save, then pull and push
+```
+
+- **Exit codes** the runner can act on: 0 done; 2 a conflict or blocked file that a person has to
+  resolve (local files are never overwritten); 1 it could not run (no store, project not tracked,
+  store busy). Whether the agent still runs after 1 or 2 is the runner's choice.
+- **Which agent learned what.** With `--agent` (or `PUNK_AGENT`), each commit ends with
+  `Punk-Agent: acme/support`, so the store's history names the agent behind every change.
+- **Many agents, one store.** Commands that change the store take a lock, so agents on one machine
+  can overlap without losing a change (they wait up to 60 s; `PUNK_LOCK_TIMEOUT`).
+- **No shell?** Agents that only speak MCP use `punk --agent acme/support mcp`.
+- **Dashboards** read the store repository directly, using its documented
+  [layout](https://github.com/gablooge/punk-records/blob/main/docs/store-format.md).
+  [Gatherlane](https://github.com/gatherlane/gatherlane), an office view of agent fleets, is one.
+
 ## How sync works
 
 - **The store is a git repo.** Every save is a commit, so `punk git log -p` shows how your agents'

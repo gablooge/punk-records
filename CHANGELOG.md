@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- README: "Agent fleets", how unattended agents use `punk session`, `--agent` and the store lock together
 - `--agent ID` (or `PUNK_AGENT`) records which agent made a change: every commit it makes ends with a
   `Punk-Agent: ID` git trailer
 - `punk session start|end [--project PATH]`: what the Claude Code hooks do, for any agent runner (cron,
