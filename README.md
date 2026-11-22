@@ -317,6 +317,10 @@ project's `CLAUDE.md` (use `-f .claude/napkin.md` to target another file).
   as the link) inside `$HOME` are followed, never anything under `.git`, `.ssh`, `.gnupg`, `.aws`
   and similar.
 
+Tools that read a store without running punk (a dashboard reading it through the GitHub API, for
+example) can rely on its layout, described in
+[docs/store-format.md](https://github.com/gablooge/punk-records/blob/main/docs/store-format.md).
+
 ## Safety
 
 - **Secret scanning.** Before a file enters the store it is checked for API keys (Anthropic, OpenAI,

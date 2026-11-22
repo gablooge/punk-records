@@ -481,6 +481,84 @@ class TestReadme(unittest.TestCase):
         self.assertEqual(relative, [])
 
 
+class TestStoreFormat(Base):
+    """docs/store-format.md is a contract for tools that read a store without punk. These tests build
+    a real store and check every fact the page states, so a format change has to update the page."""
+
+    def setUp(self):
+        super().setUp()
+        self.doc = (ROOT / "docs" / "store-format.md").read_text(encoding="utf-8")
+        self.store = Store(self.tmp / "store")
+        self.store.init(machine="laptop")
+        self.app = self.project("app", remote="git@github.com:Acme/Web.git")
+        (self.app / "CLAUDE.md").write_text("- one\n")
+        (self.app / ".claude" / "agents").mkdir(parents=True)
+        (self.app / ".claude" / "agents" / "reviewer.md").write_text("review\n")
+        self.linked = can_symlink()  # Windows without the privilege: the rest still runs
+        if self.linked:
+            os.symlink("CLAUDE.md", self.app / "AGENTS.md")
+        self.sid = self.store.track(self.app)
+        self.store.save()
+
+    def tracked(self):
+        r = subprocess.run(["git", "ls-files"], cwd=self.store.root, capture_output=True, text=True, check=True)
+        return set(r.stdout.split())
+
+    def test_branch_and_top_level_files(self):
+        import re
+        self.assertEqual(self.store.branch(), "main")
+        files = self.tracked()
+        for name in (".gitattributes", "README.md", "punk.json"):
+            self.assertIn(name, files)
+            self.assertRegex(self.doc, rf"(?m)^{re.escape(name)} ")  # in the layout block
+        self.assertEqual(json.loads((self.store.root / "punk.json").read_text()), {"include": [], "exclude": []})
+        self.assertNotIn(".git/punk-state.json", files)
+        self.assertTrue((self.store.root / ".git" / "punk-state.json").exists())
+
+    def test_ids_records_and_satellites(self):
+        self.assertEqual(self.sid, "github.com/acme/web")
+        files = self.tracked()
+        self.assertIn("records/github.com/acme/web/CLAUDE.md", files)
+        self.assertIn("records/github.com/acme/web/.claude/agents/reviewer.md", files)
+        self.assertNotIn("records/github.com/acme/web/AGENTS.md", files)  # a link, recorded in links
+        self.assertIn("records/global/.claude/CLAUDE.md", self.doc)
+        self.assertEqual((self.store.root / "records" / self.sid / "CLAUDE.md").read_bytes(), b"- one\n")
+        meta = json.loads((self.store.root / "satellites" / f"{self.sid}.json").read_text())
+        expected = {"name": "app", "kind": "project", "remote": "git@github.com:Acme/Web.git"}
+        if self.linked:
+            expected["links"] = {"AGENTS.md": "CLAUDE.md"}
+        self.assertEqual(meta, expected)
+        for key in ("name", "kind", "remote", "links"):
+            self.assertIn(f"`{key}`", self.doc)
+        glob = json.loads((self.store.root / "satellites" / "global.json").read_text())
+        self.assertEqual(glob, {"name": "global", "kind": "global"})
+        bare = self.project("Some Tool!", remote="")
+        subprocess.run(["git", "remote", "remove", "origin"], cwd=bare, capture_output=True)
+        self.assertEqual(self.store.track(bare), "local/some-tool")
+
+    def test_gitattributes_and_messages_are_documented(self):
+        from punk_records import store as store_mod
+        attrs = (self.store.root / ".gitattributes").read_text()
+        self.assertEqual(attrs, store_mod.GITATTRIBUTES)
+        for rule in ("* -text", "records/** merge=union"):
+            self.assertIn(rule, attrs)
+        self.assertIn("`* -text`", self.doc)
+        self.assertIn("`merge=union`", self.doc)
+        log = subprocess.run(["git", "log", "--format=%s"], cwd=self.store.root, capture_output=True, text=True,
+                             check=True).stdout.splitlines()
+        self.assertEqual(log[-1], "init punk records on laptop")
+        self.assertIn(f"track {self.sid}", log)
+        self.assertTrue(log[0].startswith("save "))
+        for start in ("`init punk records on <machine>`", "`track <id>`", "`save ...`"):
+            self.assertIn(start, self.doc)
+
+    def test_encrypted_remote_names_match(self):
+        from punk_records import crypt
+        self.assertIn(f"`{crypt.BUNDLE}`", self.doc)
+        self.assertEqual(crypt.REF, "refs/heads/main")
+        self.assertIn("remote branch `main`", self.doc)
+
+
 class TestMCPRegistry(unittest.TestCase):
     """server.json lists punk in the MCP Registry; the registry rejects a version whose PyPI README
     lacks the matching `mcp-name:` line, and clients start it as `uvx punk-records mcp`."""
