@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-11-22
+
+Easier to find and set up: the MCP Registry, a Claude Code plugin, and a `punk-records` command.
 
 - Listed in the MCP Registry as `io.github.gablooge/punk-records` (`server.json`; published by the
   release workflow after PyPI, over GitHub OIDC)
