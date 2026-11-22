@@ -642,6 +642,80 @@ class TestStoreLock(Base):
         self.assertIn("`.git/punk.lock`", (ROOT / "docs" / "store-format.md").read_text(encoding="utf-8"))
 
 
+class TestAgentTrailer(Base):
+    """--agent / PUNK_AGENT record which agent made a change, as a git trailer a dashboard can read."""
+
+    def setUp(self):
+        super().setUp()
+        self.store = Store(self.tmp / "store")
+        self.store.init(machine="host", track_global=False)
+        app = self.project("app")
+        (app / "CLAUDE.md").write_text("# App\n")
+        self.sid = self.store.track(app)
+        self.store.save()
+        os.environ["PUNK_HOME"] = str(self.store.root)
+        os.environ.pop("PUNK_AGENT", None)
+
+    def cli(self, *args):
+        from io import StringIO
+        from unittest import mock
+        err = StringIO()
+        with mock.patch("sys.stderr", err), mock.patch("sys.stdout", StringIO()):
+            try:
+                code = cli.main(list(args))
+            except SystemExit as e:  # argparse errors
+                code = e.code
+        return code, err.getvalue()
+
+    def agents(self, n=1):
+        r = subprocess.run(["git", "log", f"-{n}", "--format=%(trailers:key=Punk-Agent,valueonly)%x00"],
+                           cwd=self.store.root, capture_output=True, text=True, check=True)
+        return [x.strip() for x in r.stdout.split("\0")[:n]]
+
+    def test_agent_option_adds_a_trailer(self):
+        self.assertEqual(self.cli("--agent", "acme/support", "remember", "-s", self.sid, "refunds need a ticket")[0], 0)
+        self.assertEqual(self.agents(), ["acme/support"])
+        subject = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=self.store.root, capture_output=True,
+                                 text=True, check=True).stdout.strip()
+        self.assertEqual(subject, f"remember in {self.sid}/CLAUDE.md")
+
+    def test_environment_variable_and_save_message(self):
+        os.environ["PUNK_AGENT"] = "acme/implementer"
+        (self.tmp / "app" / "CLAUDE.md").write_text("# App\n- run make test\n")
+        self.assertEqual(self.cli("save", "-m", "implementer: run 06:00")[0], 0)
+        self.assertEqual(self.agents(), ["acme/implementer"])
+        body = subprocess.run(["git", "log", "-1", "--format=%B"], cwd=self.store.root, capture_output=True,
+                              text=True, check=True).stdout
+        self.assertEqual(body.strip(), "implementer: run 06:00\n\nPunk-Agent: acme/implementer")
+
+    def test_no_agent_no_trailer(self):
+        self.assertEqual(self.cli("remember", "-s", self.sid, "plain")[0], 0)
+        self.assertEqual(self.agents(), [""])
+
+    def test_invalid_ids_are_refused_before_anything_changes(self):
+        head = self.store.git("rev-parse", "HEAD").stdout
+        for bad in ("acme/support\nPunk-Agent: evil", "two words", "-flag", "x" * 129, "a\tb", ".hidden"):
+            code, err = self.cli(f"--agent={bad}", "remember", "-s", self.sid, "nope")
+            self.assertEqual(code, 2, bad)
+            self.assertIn("invalid agent id", err, bad)
+        self.assertEqual(self.store.git("rev-parse", "HEAD").stdout, head)
+        self.assertNotIn("nope", self.store.read(self.sid, "CLAUDE.md"))
+        self.assertEqual(Store(self.store.root, agent="").agent, None)  # empty means unset
+        self.assertEqual(Store(self.store.root, agent="op/a.b@host:1+x").agent, "op/a.b@host:1+x")
+
+    def test_git_passthrough_still_works_with_agent(self):
+        # `--version` after `git` is git's, not punk's: the split must skip --agent like --home
+        r = subprocess.run([sys.executable, "-m", "punk_records", "--agent", "acme/x", "git", "--version"],
+                           env={**os.environ, "PYTHONPATH": str(ROOT / "src")}, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.startswith("git version"), r.stdout)
+
+    def test_documented(self):
+        doc = (ROOT / "docs" / "store-format.md").read_text(encoding="utf-8")
+        self.assertIn("`Punk-Agent: <id>`", doc)
+        self.assertIn("`PUNK_AGENT`", doc)
+
+
 class TestMCPRegistry(unittest.TestCase):
     """server.json lists punk in the MCP Registry; the registry rejects a version whose PyPI README
     lacks the matching `mcp-name:` line, and clients start it as `uvx punk-records mcp`."""

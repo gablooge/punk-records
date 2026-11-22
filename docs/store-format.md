@@ -75,6 +75,20 @@ Every change is a commit on the branch. The messages `punk` writes start with wh
 or `punk@<machine>` when it has none. The history of one satellite is the history of
 `records/<id>/` (and its `satellites/<id>.json`).
 
+When a command runs with `--agent <id>` or with `PUNK_AGENT` set (an agent in a fleet, for
+example), each of its commits ends with a git trailer naming that agent, `Punk-Agent: <id>`:
+
+```
+remember in github.com/acme/web/CLAUDE.md
+
+Punk-Agent: acme/support
+```
+
+An agent id is one line of letters, digits and `. _ / @ : + -`, starting with a letter or digit,
+up to 128 characters, so it cannot add other lines to a message. Read it with
+`git log --format='%(trailers:key=Punk-Agent,valueonly)'`, or from the commit message that the
+GitHub commits API returns. Commits without the trailer were made without an agent id.
+
 ## Encrypted remotes
 
 With `punk encrypt`, the local store is unchanged but its remote never holds this layout: the
