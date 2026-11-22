@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Listed in the MCP Registry as `io.github.gablooge/punk-records` (`server.json`; published by the
+  release workflow after PyPI, over GitHub OIDC)
+- `punk-records` is also installed as a command (same as `punk`), so `uvx punk-records mcp` works
 - README: the Punk Records VS Code extension (Marketplace and Open VSX)
 
 ## 0.4.0 - 2026-11-21
