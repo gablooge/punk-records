@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `--agent ID` (or `PUNK_AGENT`) records which agent made a change: every commit it makes ends with a
+  `Punk-Agent: ID` git trailer
 - `docs/store-format.md`: the store's layout (branch, `records/`, `satellites/*.json`, history, encrypted
   remotes) for tools that read a store without punk, kept true by tests
 - Commands that change the store take a lock, so several punk processes on one machine (cron agents,

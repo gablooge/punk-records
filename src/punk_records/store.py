@@ -45,6 +45,19 @@ GITATTRIBUTES = """\
 records/** merge=union
 """
 
+# An agent id recorded in commits as a "Punk-Agent:" trailer: one line, no spaces, so it can never
+# add another trailer or line to a commit message.
+AGENT_TRAILER = "Punk-Agent"
+_AGENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,127}")
+
+
+def validate_agent(agent: str) -> str:
+    if not _AGENT_RE.fullmatch(agent):
+        raise PunkError(f"invalid agent id {agent!r}: use letters, digits and . _ / @ : + - "
+                        f"(starting with a letter or digit), up to 128 characters")
+    return agent
+
+
 # Seconds a command waits for another punk process to finish with the store (PUNK_LOCK_TIMEOUT).
 LOCK_TIMEOUT = 60.0
 LOCK_FILE = "punk.lock"  # in .git/, so it is never committed
@@ -292,9 +305,11 @@ def _make_link(root: Path, rel: str, target: str) -> None:
 
 
 class Store:
-    def __init__(self, root: Path | str | None = None):
+    def __init__(self, root: Path | str | None = None, agent: str | None = None):
         self.root = Path(root).expanduser() if root else default_home()
         self._lock_depth = 0
+        # who is writing, for tools that show which agent learned what (docs/store-format.md)
+        self.agent = validate_agent(agent) if agent else None
 
     @contextmanager
     def lock(self):
@@ -386,6 +401,8 @@ class Store:
         self.git("add", "-A")
         if self.git("diff", "--cached", "--quiet", check=False).returncode == 0:
             return False
+        if self.agent:
+            message = f"{message.rstrip()}\n\n{AGENT_TRAILER}: {self.agent}"
         self.git("commit", "-q", "-m", message)
         return True
 
