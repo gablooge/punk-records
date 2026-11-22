@@ -16,7 +16,7 @@ import subprocess
 from pathlib import Path
 
 from .discover import MAX_BYTES
-from .store import GLOBAL_ID, PunkError, Store, _force_rmtree
+from .store import GLOBAL_ID, PunkError, Store, _force_rmtree, locked_store
 
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 FORBIDDEN_URL = re.compile(r"^\s*(ext|fd)::", re.IGNORECASE)  # git transports that run commands
@@ -44,6 +44,7 @@ class Team:
     def url(self, name: str) -> str:
         return self._git(name, "config", "--get", "remote.origin.url", check=False).stdout.decode().strip()
 
+    @locked_store
     def subscribe(self, name: str, url: str) -> None:
         self.store.require()
         if not NAME.match(name):
@@ -62,11 +63,13 @@ class Team:
             _force_rmtree(self.dir / name)
             raise PunkError(f"{url} is not a Punk Records store (no records/ on its default branch)")
 
+    @locked_store
     def unsubscribe(self, name: str) -> None:
         if name not in self.names():
             raise PunkError(f"not subscribed to {name!r} (see `punk subscriptions`)")
         _force_rmtree(self.dir / name)
 
+    @locked_store
     def update(self) -> list[tuple[str, str]]:
         """Fetch every subscription. Returns [(name, error)] for the ones that failed (kept as they were)."""
         failed = []

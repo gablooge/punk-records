@@ -26,7 +26,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .store import PunkError, Store
+from .store import PunkError, Store, locked_store
 
 BUNDLE = "punk-records.bundle.age"
 REF = "refs/heads/main"
@@ -107,6 +107,7 @@ class Crypt:
             raise PunkError(PLAIN_REMOTE.format(names=", ".join(names), first=names[0]))
 
     # ------------------------------------------------------------------ setup
+    @locked_store
     def setup(self, url: str) -> None:
         self.store.require()
         _need_age()
@@ -122,6 +123,7 @@ class Crypt:
         self.git("config", "user.name", "punk")
         self.git("config", "user.email", "punk@punk-records.invalid")
 
+    @locked_store
     def add_recipient(self, recipient: str) -> None:
         recipient = recipient.strip()
         _need_age()
@@ -195,6 +197,7 @@ class Crypt:
             return False  # another machine pushed in between: caller re-merges and retries
         raise PunkError(f"could not push to the encrypted remote:\n{_err(r)}")
 
+    @locked_store
     def exchange(self, push: bool = True, attempts: int = 3) -> bool:
         self._check_plain_remotes()
         for _ in range(attempts):

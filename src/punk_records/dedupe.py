@@ -81,11 +81,12 @@ def find(store: Store, ids: list[str] | None = None, rel: str | None = None):
 
 def apply(store: Store, found: list) -> list:
     """Write the deduplicated copies, commit, and restore the affected satellites on this machine."""
-    for sid, r, _, new, _ in found:
-        _safe_target(store.records / sid, r).write_bytes(new)
-    lines = sum(len(x[4]) for x in found)
-    store.commit(f"dedupe {lines} line{'' if lines == 1 else 's'} in {len(found)} "
-                 f"file{'' if len(found) == 1 else 's'}")
-    local = store.load_state()["paths"]
-    sids = sorted({sid for sid, *_ in found if sid in local})
-    return store.restore(sids) if sids else []
+    with store.lock():
+        for sid, r, _, new, _ in found:
+            _safe_target(store.records / sid, r).write_bytes(new)
+        lines = sum(len(x[4]) for x in found)
+        store.commit(f"dedupe {lines} line{'' if lines == 1 else 's'} in {len(found)} "
+                     f"file{'' if len(found) == 1 else 's'}")
+        local = store.load_state()["paths"]
+        sids = sorted({sid for sid, *_ in found if sid in local})
+        return store.restore(sids) if sids else []

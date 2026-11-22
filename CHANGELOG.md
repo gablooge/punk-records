@@ -4,6 +4,9 @@
 
 - `docs/store-format.md`: the store's layout (branch, `records/`, `satellites/*.json`, history, encrypted
   remotes) for tools that read a store without punk, kept true by tests
+- Commands that change the store take a lock, so several punk processes on one machine (cron agents,
+  hooks, the MCP server) no longer fail with git's `index.lock` error or lose a change. They wait
+  up to 60 s (`PUNK_LOCK_TIMEOUT`; hooks 20 s), then stop with a clear error
 
 ## 0.5.0 - 2026-11-22
 

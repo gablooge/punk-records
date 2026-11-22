@@ -22,7 +22,8 @@ records/<satellite id>/<path>       the memory files themselves
 ```
 
 `.git/punk-state.json` is machine-local (where each satellite lives on this machine, and the hashes
-seen at the last sync). It is never committed or pushed, so a reader of the remote never sees it.
+seen at the last sync), and `.git/punk.lock` is the lock a command holds while it changes the store.
+Neither is ever committed or pushed, so a reader of the remote never sees them.
 
 ## Satellite ids
 

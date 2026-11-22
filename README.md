@@ -334,6 +334,11 @@ example) can rely on its layout, described in
 - **Keep the remote private.** Memories describe your code and habits. On a host you do not trust,
   use `punk encrypt` (above): the host then sees one age-encrypted file. Encryption hides content but
   does not prove who wrote it; the restricted-write rules above still apply to anything synced in.
+- **One writer at a time.** Commands that change the store take a lock (`.git/punk.lock`), so
+  agents run from cron, hooks and the MCP server can overlap without losing a change. A command
+  waits up to 60 seconds for another one to finish (`PUNK_LOCK_TIMEOUT` changes that; hooks wait
+  20, inside Claude Code's 30-second limit), then stops with an error and changes nothing. The
+  lock goes away with the process that held it, even if it crashed.
 
 ## Commands
 
