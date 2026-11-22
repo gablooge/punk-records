@@ -4,8 +4,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - run: pip install ruff==0.17.5  # dev tool only, not a runtime dependency
@@ -21,8 +21,8 @@ jobs:
     # combination runs on 24.04. The matrix label (and so the required check name) stays the same.
     runs-on: ${{ matrix.os == 'ubuntu-latest' && matrix.python == '3.9' && 'ubuntu-24.04' || matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       # age is optional for users; install it so the encryption tests run instead of skipping
