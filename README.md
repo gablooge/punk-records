@@ -61,7 +61,9 @@ is honoured; a custom `autoMemoryDirectory` setting is not read yet.
 Requires Python 3.9+ and git. No other dependencies.
 
 ```bash
-pipx install punk-records      # or: pip install punk-records
+pipx install punk-records                 # or: pip install punk-records
+brew install gablooge/tap/punk-records    # Homebrew on macOS or Linux; brings its own Python
+uv tool install punk-records              # with uv
 ```
 
 ## Quickstart
@@ -352,11 +354,12 @@ watch             save automatically when memory files change
 
 ## Roadmap
 
-- Built-in encryption (age) for untrusted remotes
-- `punk watch`: save automatically when memory files change
-- Semantic search and deduplication across projects
-- Shared "team brain" satellites that you can subscribe to read-only
+- Semantic search and deduplication across projects (today `punk search` matches text or a regex,
+  and `punk dedupe` removes exact duplicate lines)
 - Small web UI for browsing memory history
+
+Shipped from earlier versions of this list: encryption for untrusted remotes (`punk encrypt`),
+saving on change (`punk watch`) and read-only team stores (`punk subscribe`).
 
 ## Development
 
