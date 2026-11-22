@@ -363,6 +363,11 @@ session start|end for agent runners (cron, CI): restore before a run, save + syn
 watch             save automatically when memory files change
 ```
 
+Every command takes `--home DIR` (or `PUNK_HOME`) for another store, and `--agent ID` (or
+`PUNK_AGENT`) to record which agent made a change: its commits end with `Punk-Agent: ID`, which
+tools such as a fleet dashboard can read from the store's history
+([store format](https://github.com/gablooge/punk-records/blob/main/docs/store-format.md)).
+
 ## Roadmap
 
 - Semantic search and deduplication across projects (today `punk search` matches text or a regex,

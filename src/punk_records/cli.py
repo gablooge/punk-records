@@ -422,6 +422,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="punk", description="Punk Records - one brain for all your AI agents' "
                                 "memories (CLAUDE.md, AGENTS.md, napkins, rules...), synced online or air-gapped.")
     p.add_argument("--home", help="store location (default: $PUNK_HOME or ~/.punk-records)")
+    p.add_argument("--agent", help="agent id to record in the store's commits as a Punk-Agent trailer "
+                                   "(default: $PUNK_AGENT), e.g. acme/support")
     p.add_argument("--version", action="version", version=f"punk {__version__}")
     sub = p.add_subparsers(dest="cmd", metavar="command")
 
@@ -566,9 +568,9 @@ def _utf8_when_piped() -> None:
 
 
 def _split_git(argv: list[str]) -> tuple[list[str], list[str] | None]:
-    """Split `punk [--home X] git ARGS...`: argparse would take `git --help` / `git -h` for itself."""
+    """Split `punk [--home X] [--agent Y] git ARGS...`: argparse would take `git --help` for itself."""
     i = 0
-    while i < len(argv) and argv[i].startswith("--home"):
+    while i < len(argv) and argv[i].startswith(("--home", "--agent")):
         i += 1 if "=" in argv[i] else 2
     if i < len(argv) and argv[i] == "git":
         return argv[:i + 1], argv[i + 1:]
@@ -585,8 +587,8 @@ def main(argv: list[str] | None = None) -> int:
     if not getattr(a, "fn", None):
         parser.print_help()
         return 0
-    store = Store(a.home or os.environ.get("PUNK_HOME"))
     try:
+        store = Store(a.home or os.environ.get("PUNK_HOME"), agent=a.agent or os.environ.get("PUNK_AGENT") or None)
         return a.fn(store, a)
     except PunkError as e:
         print(f"punk: {e}", file=sys.stderr)
