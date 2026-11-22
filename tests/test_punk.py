@@ -716,6 +716,95 @@ class TestAgentTrailer(Base):
         self.assertIn("`PUNK_AGENT`", doc)
 
 
+class TestSessionCommand(Base):
+    """`punk session start|end`: the hooks' work for any agent runner, with exit codes it can act on."""
+
+    def setUp(self):
+        super().setUp()
+        self.remote = self.tmp / "remote.git"
+        git("init", "-q", "--bare", str(self.remote), cwd=self.tmp)
+        self.a = Store(self.tmp / "a-store")
+        self.a.init(machine="a", track_global=False)
+        git("remote", "add", "origin", str(self.remote), cwd=self.a.root)
+        self.a_app = self.project("a/app")
+        (self.a_app / "CLAUDE.md").write_text("- one\n")
+        self.sid = self.a.track(self.a_app)
+        self.a.sync()
+        self.b = Store(self.tmp / "b-store")
+        self.b.init(str(self.remote), machine="b", track_global=False)
+        self.b_app = self.project("b/app")
+        self.b.track(self.b_app)
+        self.b.restore()
+
+    def session(self, store, step, project, **env):
+        r = subprocess.run([sys.executable, "-m", "punk_records", "--home", str(store.root), "session", step,
+                            "--project", str(project)], capture_output=True, text=True,
+                           env={**os.environ, "PYTHONPATH": str(ROOT / "src"), **env})
+        return r.returncode, r.stdout, r.stderr
+
+    def test_start_restores_and_end_saves_and_syncs(self):
+        (self.b_app / "CLAUDE.md").write_text("- one\n- from b\n")
+        self.b.sync()
+        code, out, err = self.session(self.a, "start", self.a_app)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.strip(), f"punk: session start done for {self.sid}")
+        self.assertEqual((self.a_app / "CLAUDE.md").read_text(), "- one\n- from b\n")
+        (self.a_app / "CLAUDE.md").write_text("- one\n- from b\n- from a\n")
+        self.assertEqual(self.session(self.a, "end", self.a_app)[0], 0)
+        self.b.sync()
+        self.assertEqual((self.b_app / "CLAUDE.md").read_text(), "- one\n- from b\n- from a\n")
+
+    def test_end_with_an_agent_id_signs_the_commit(self):
+        (self.a_app / "CLAUDE.md").write_text("- one\n- learned by an agent\n")
+        r = subprocess.run([sys.executable, "-m", "punk_records", "--home", str(self.a.root), "--agent",
+                            "acme/implementer", "session", "end", "--project", str(self.a_app)],
+                           capture_output=True, text=True, env={**os.environ, "PYTHONPATH": str(ROOT / "src")})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        agent = subprocess.run(["git", "log", "-1", "--format=%(trailers:key=Punk-Agent,valueonly)"],
+                               cwd=self.a.root, capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(agent, "acme/implementer")
+
+    def test_an_unreachable_remote_is_a_warning(self):
+        git("remote", "set-url", "origin", str(self.tmp / "gone.git"), cwd=self.a.root)
+        code, _, err = self.session(self.a, "start", self.a_app)
+        self.assertEqual(code, 0)
+        self.assertIn("could not reach the remote", err)
+
+    def test_a_conflict_needs_a_person(self):
+        (self.b_app / "CLAUDE.md").write_text("- one\n- from b\n")
+        self.b.sync()
+        (self.a_app / "CLAUDE.md").write_text("- one\n- edited on a too\n")
+        code, out, err = self.session(self.a, "start", self.a_app)
+        self.assertEqual(code, 2, err)
+        self.assertIn(f"punk: conflict {self.sid}/CLAUDE.md", err)
+        self.assertEqual(out, "")
+        self.assertEqual((self.a_app / "CLAUDE.md").read_text(), "- one\n- edited on a too\n")  # never overwritten
+
+    def test_no_store_or_untracked_project_fails(self):
+        code, _, err = self.session(Store(self.tmp / "none"), "start", self.a_app)
+        self.assertEqual(code, 1)
+        self.assertIn("no store at", err)
+        other = self.project("other", remote="git@github.com:me/other.git")
+        code, _, err = self.session(self.a, "end", other)
+        self.assertEqual(code, 1)
+        self.assertIn("is not tracked", err)
+
+    def test_a_busy_store_fails_without_waiting_forever(self):
+        code = ("import sys, time; sys.path.insert(0, sys.argv[2]); from punk_records.store import Store; "
+                "s = Store(sys.argv[1]); held = s.lock(); held.__enter__(); print('held', flush=True); "
+                "time.sleep(30)")
+        holder = subprocess.Popen([sys.executable, "-c", code, str(self.a.root), str(ROOT / "src")],
+                                  stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(holder.stdout.readline().strip(), "held")
+            rc, _, err = self.session(self.a, "end", self.a_app, PUNK_LOCK_TIMEOUT="0.5")
+        finally:
+            holder.kill()
+            holder.communicate()
+        self.assertEqual(rc, 1)
+        self.assertIn("another punk process is using the store", err)
+
+
 class TestMCPRegistry(unittest.TestCase):
     """server.json lists punk in the MCP Registry; the registry rejects a version whose PyPI README
     lacks the matching `mcp-name:` line, and clients start it as `uvx punk-records mcp`."""

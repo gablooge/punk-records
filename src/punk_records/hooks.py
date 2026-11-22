@@ -139,11 +139,66 @@ def _first_line(e: Exception) -> str:
     return (str(e).strip().splitlines() or [type(e).__name__])[0]
 
 
+class Outcome:
+    """What a session step did: notes for the user, and whether a human must act or it failed."""
+
+    def __init__(self) -> None:
+        self.notes: list[str] = []
+        self.attention = False  # a conflict or blocked file: a person has to resolve it
+        self.failed = False  # the step could not run (an error, a busy store)
+        self.skipped = ""  # why nothing was done, when nothing was: no store, project not tracked
+
+
+def session(store: Store, action: str, cwd: Path, label: str = "") -> Outcome:
+    """The work of a session start or end, for the global satellite and the project at `cwd`.
+
+    start: pull if a remote is set (a failure is only a note), restore, update team subscriptions.
+    end:   save, then pull and push if a remote is set (a failure is only a note).
+    Never raises. `label` names the step in a failure note (default `session <action>`).
+    """
+    out = Outcome()
+    try:
+        if not store.exists():
+            out.skipped = f"no store at {store.root}; run `punk init` first"
+            return out
+        ids = _satellites(store, cwd)
+        if store.satellite_for(cwd) is None:
+            out.skipped = f"{cwd} is not tracked; run `punk track {cwd}`"
+        if not ids:
+            return out
+        if action == "start":
+            try:
+                store.exchange(push=False)
+            except PunkError as e:
+                out.notes.append(f"punk: could not reach the remote ({_first_line(e)}); using the local store")
+            actions = store.restore(ids)
+            from .team import Team
+            out.notes += [f"punk: could not update subscription {name} ({error})"
+                          for name, error in Team(store).update()]
+        else:
+            actions = store.save(ids)
+            try:
+                store.exchange()
+            except PunkError as e:
+                out.notes.append(f"punk: saved locally but could not sync ({_first_line(e)})")
+        bad = [a for a in actions if a.kind in ("conflict", "blocked")]
+        out.notes += [f"punk: {a.kind} {a.sat}/{a.rel}" + (f" ({a.note})" if a.note else "") for a in bad]
+        if bad:
+            out.attention = True
+            out.notes.append("Run `punk status`, and `punk diff <satellite> <path>` for conflicts.")
+    except Exception as e:  # noqa: BLE001 - report anything, never crash the agent's session
+        out.failed = True
+        out.notes.append(f"punk: {label or 'session ' + action} failed: {_first_line(e)}")
+    return out
+
+
 def run(store: Store, action: str, stdin_text: str) -> tuple[int, str, str]:
     """Run one hook. Returns (exit code, stdout, stderr). Never raises: a hook must not break a session.
 
     SessionStart: stdout is added to Claude's context, so success prints nothing; problems go to the
     user as a JSON systemMessage. SessionEnd: problems exit 2, which shows stderr to the user.
+    A store that does not exist or a project that is not tracked is silent: the hooks are installed
+    for every session, tracked or not.
     """
     try:
         payload = json.loads(stdin_text or "{}")
@@ -155,36 +210,10 @@ def run(store: Store, action: str, stdin_text: str) -> tuple[int, str, str]:
     # Claude Code stops a hook after TIMEOUT seconds; wait for a busy store less than that, so a
     # store held by another punk process is reported instead of the hook being killed silently.
     os.environ.setdefault("PUNK_LOCK_TIMEOUT", str(TIMEOUT - 10))
-    notes = []
-    try:
-        if not store.exists():
-            return 0, "", ""
-        ids = _satellites(store, cwd)
-        if not ids:
-            return 0, "", ""
-        if action == "session-start":
-            try:
-                store.exchange(push=False)
-            except PunkError as e:
-                notes.append(f"punk: could not reach the remote ({_first_line(e)}); using the local store")
-            actions = store.restore(ids)
-            from .team import Team
-            notes += [f"punk: could not update subscription {name} ({error})" for name, error in Team(store).update()]
-        else:
-            actions = store.save(ids)
-            try:
-                store.exchange()
-            except PunkError as e:
-                notes.append(f"punk: saved locally but could not sync ({_first_line(e)})")
-        bad = [a for a in actions if a.kind in ("conflict", "blocked")]
-        notes += [f"punk: {a.kind} {a.sat}/{a.rel}" + (f" ({a.note})" if a.note else "") for a in bad]
-        if bad:
-            notes.append("Run `punk status`, and `punk diff <satellite> <path>` for conflicts.")
-    except Exception as e:  # noqa: BLE001 - report anything, never crash the agent's session
-        notes.append(f"punk: hook {action} failed: {_first_line(e)}")
-    if not notes:
+    out = session(store, "start" if action == "session-start" else "end", cwd, label=f"hook {action}")
+    if not out.notes:
         return 0, "", ""
-    message = "\n".join(notes)
+    message = "\n".join(out.notes)
     if action == "session-start":
         return 0, json.dumps({"systemMessage": message}) + "\n", ""
     return 2, "", message + "\n"

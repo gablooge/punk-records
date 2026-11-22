@@ -358,6 +358,8 @@ mcp               MCP server on stdio
 encrypt ...       encrypted remote: init URL | add-recipient KEY | status
 subscribe NAME URL  read another store read-only (unsubscribe NAME, subscriptions)
 install-hooks     sync automatically when Claude Code sessions start and end
+session start|end for agent runners (cron, CI): restore before a run, save + sync after it;
+                  exits 0 done, 2 a person must resolve a conflict, 1 failed
 watch             save automatically when memory files change
 ```
 

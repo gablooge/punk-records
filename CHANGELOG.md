@@ -4,6 +4,8 @@
 
 - `--agent ID` (or `PUNK_AGENT`) records which agent made a change: every commit it makes ends with a
   `Punk-Agent: ID` git trailer
+- `punk session start|end [--project PATH]`: what the Claude Code hooks do, for any agent runner (cron,
+  CI, a scheduler), with exit codes it can act on: 0 done, 2 a person must resolve a conflict, 1 failed
 - `docs/store-format.md`: the store's layout (branch, `records/`, `satellites/*.json`, history, encrypted
   remotes) for tools that read a store without punk, kept true by tests
 - Commands that change the store take a lock, so several punk processes on one machine (cron agents,

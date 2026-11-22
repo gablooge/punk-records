@@ -389,6 +389,28 @@ def cmd_hook(store: Store, a) -> int:
     return code
 
 
+def cmd_session(store: Store, a) -> int:
+    """For any agent runner (cron, CI, a scheduler): restore before a run, save and sync after it.
+
+    Exit codes: 0 done (warnings, such as an unreachable remote, go to stderr); 2 a person must act
+    (a conflict or a blocked file, listed); 1 it could not run (no store, project not tracked, a busy
+    store, an error). The agent can still run after 1 or 2; the runner decides.
+    """
+    from . import hooks
+    cwd = Path(a.project).expanduser().resolve() if a.project else Path.cwd()
+    out = hooks.session(store, a.step, cwd)
+    if out.skipped:
+        print(f"punk: {out.skipped}", file=sys.stderr)
+    for note in out.notes:
+        print(note, file=sys.stderr)
+    if out.failed or out.skipped:
+        return 1
+    if out.attention:
+        return 2
+    print(f"punk: session {a.step} done for {store.satellite_for(cwd)}")
+    return 0
+
+
 def cmd_mcp(store: Store, a) -> int:
     from .mcp import serve
     store.require()
@@ -523,6 +545,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="only for this project (.claude/settings.local.json) instead of all projects")
     sp.add_argument("--uninstall", action="store_true", help="remove punk's hooks, keep everything else")
     sp.add_argument("-n", "--dry-run", action="store_true")
+
+    sp = add("session", cmd_session, "for agent runners: `start` restores before a run, `end` saves and syncs "
+             "after it (exit 0 done, 2 needs a person, 1 failed)")
+    sp.add_argument("step", choices=["start", "end"])
+    sp.add_argument("--project", help="the project the agent works in (default: the current directory)")
 
     sp = add("hook", cmd_hook, "run a Claude Code hook (used by install-hooks; reads the hook's JSON on stdin)")
     sp.add_argument("event", choices=["session-start", "session-end"])
