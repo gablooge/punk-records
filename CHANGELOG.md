@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- README: the Punk Records VS Code extension (Marketplace and Open VSX)
+
 ## 0.4.0 - 2026-11-21
 
 JSON output for editor integrations, Claude Code auto memory, and safer moves.

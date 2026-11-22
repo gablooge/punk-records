@@ -186,6 +186,13 @@ Any other MCP client works the same way: a stdio server with `"command": "punk"`
 
 ### VS Code
 
+- **Punk Records extension:** a status bar item (in sync, to save, to restore, conflicts), the
+  commands, "Compare with store" in the side-by-side diff, and a view of every tracked project and
+  team store. Install it from the
+  [Marketplace](https://marketplace.visualstudio.com/items?itemName=gablooge.punk-records)
+  (`code --install-extension gablooge.punk-records`) or, for VSCodium and Cursor,
+  [Open VSX](https://open-vsx.org/extension/gablooge/punk-records). It needs punk 0.4.0 or newer;
+  source at [punk-records-vscode](https://github.com/gablooge/punk-records-vscode).
 - **Claude Code extension:** nothing extra to do. It shares `~/.claude/settings.json` and the MCP
   configuration with the CLI, so `punk install-hooks` and
   `claude mcp add --scope user punk-records -- punk mcp` apply inside VS Code too.
