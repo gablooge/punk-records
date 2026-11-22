@@ -511,6 +511,45 @@ class TestMCPRegistry(unittest.TestCase):
         self.assertRegex(scripts, r'(?m)^punk = "punk_records\.cli:main"$')
 
 
+class TestClaudePlugin(unittest.TestCase):
+    """claude-plugin/ is the Claude Code plugin, listed by .claude-plugin/marketplace.json. It must do
+    what `punk install-hooks` and `claude mcp add ... punk mcp` do, and only name real commands."""
+
+    def load(self, rel):
+        return json.loads((ROOT / rel).read_text(encoding="utf-8"))
+
+    def test_manifest_and_marketplace_agree(self):
+        from punk_records import __version__
+        plugin = self.load("claude-plugin/.claude-plugin/plugin.json")
+        market = self.load(".claude-plugin/marketplace.json")
+        self.assertEqual(plugin["version"], __version__)
+        (entry,) = market["plugins"]
+        self.assertEqual((entry["name"], entry["source"]), (plugin["name"], "./claude-plugin"))
+
+    def test_hooks_match_install_hooks(self):
+        from punk_records import hooks
+        events = self.load("claude-plugin/hooks/hooks.json")["hooks"]
+        self.assertEqual(set(events), set(hooks.EVENTS))
+        for event, (matcher, action, status) in hooks.EVENTS.items():
+            (group,) = events[event]
+            self.assertEqual(group.get("matcher"), matcher)
+            (h,) = group["hooks"]
+            self.assertEqual(h, {"type": "command", "command": "punk", "args": ["hook", action],
+                                 "timeout": hooks.TIMEOUT, "statusMessage": status})
+
+    def test_mcp_server_runs_punk_mcp(self):
+        servers = self.load("claude-plugin/.mcp.json")["mcpServers"]
+        self.assertEqual(servers, {"punk-records": {"command": "punk", "args": ["mcp"]}})
+
+    def test_setup_skill_names_real_commands(self):
+        import re
+        sub = next(a for a in cli.build_parser()._actions if isinstance(a.choices, dict))
+        text = (ROOT / "claude-plugin" / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+        named = set(re.findall(r"`punk ([a-z][a-z-]*)", text))
+        self.assertTrue(named)
+        self.assertEqual(sorted(named - set(sub.choices)), [])
+
+
 class TestMCP(Base):
     def test_tools(self):
         s = Store(self.tmp / "s")

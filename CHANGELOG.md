@@ -5,6 +5,8 @@
 - Listed in the MCP Registry as `io.github.gablooge/punk-records` (`server.json`; published by the
   release workflow after PyPI, over GitHub OIDC)
 - `punk-records` is also installed as a command (same as `punk`), so `uvx punk-records mcp` works
+- Claude Code plugin: `/plugin install punk-records --marketplace gablooge/punk-records` adds the
+  MCP server and the session hooks in one step, plus a `setup` skill
 - README: the Punk Records VS Code extension (Marketplace and Open VSX)
 
 ## 0.4.0 - 2026-11-21
