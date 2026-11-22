@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `docs/store-format.md`: the store's layout (branch, `records/`, `satellites/*.json`, history, encrypted
+  remotes) for tools that read a store without punk, kept true by tests
+
 ## 0.5.0 - 2026-11-22
 
 Easier to find and set up: the MCP Registry, a Claude Code plugin, and a `punk-records` command.
