@@ -6,6 +6,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/gablooge/punk-records/blob/main/LICENSE)
 [![Sponsor](https://img.shields.io/badge/Sponsor-gablooge-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/gablooge)
 
+<!-- mcp-name: io.github.gablooge/punk-records -->
+
 **One brain for all your AI agents.** Persist every `CLAUDE.md`, `AGENTS.md`, napkin, and rules file
 from every project and machine in a single versioned store. Sync it over any git remote, or carry it
 across an air gap on a USB stick. Agents can read and write it live over MCP.
@@ -183,6 +185,10 @@ codex mcp add punk-records -- punk mcp     # or [mcp_servers.punk-records] in ~/
 
 Any other MCP client works the same way: a stdio server with `"command": "punk"` and
 `"args": ["mcp"]`.
+
+Clients that browse the [MCP Registry](https://registry.modelcontextprotocol.io) find it as
+`io.github.gablooge/punk-records`; they start it with `uvx punk-records mcp`, which needs
+[uv](https://docs.astral.sh/uv/) instead of a pipx install. Run `uvx punk-records init` once first.
 
 ### VS Code
 
