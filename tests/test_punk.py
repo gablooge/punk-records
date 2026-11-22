@@ -481,6 +481,36 @@ class TestReadme(unittest.TestCase):
         self.assertEqual(relative, [])
 
 
+class TestMCPRegistry(unittest.TestCase):
+    """server.json lists punk in the MCP Registry; the registry rejects a version whose PyPI README
+    lacks the matching `mcp-name:` line, and clients start it as `uvx punk-records mcp`."""
+
+    def setUp(self):
+        from punk_records import __version__
+        self.version = __version__
+        self.server = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
+
+    def test_versions_follow_the_package(self):
+        self.assertEqual(self.server["version"], self.version)
+        self.assertEqual([p["version"] for p in self.server["packages"]], [self.version])
+
+    def test_readme_proves_the_name(self):
+        import re
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        # the registry needs a boundary after the name: whitespace, a tag, or the comment close
+        self.assertRegex(text, r"mcp-name: " + re.escape(self.server["name"]) + r"(\s|<|-->)")
+
+    def test_pypi_package_starts_the_mcp_server(self):
+        (pkg,) = self.server["packages"]
+        self.assertEqual((pkg["registryType"], pkg["identifier"]), ("pypi", "punk-records"))
+        self.assertEqual(pkg["packageArguments"], [{"type": "positional", "value": "mcp"}])
+        self.assertLessEqual(len(self.server["description"]), 100)
+        scripts = (ROOT / "pyproject.toml").read_text(encoding="utf-8").split("[project.scripts]")[1].split("\n[")[0]
+        # uvx runs the executable named after the package
+        self.assertRegex(scripts, r'(?m)^punk-records = "punk_records\.cli:main"$')
+        self.assertRegex(scripts, r'(?m)^punk = "punk_records\.cli:main"$')
+
+
 class TestClaudePlugin(unittest.TestCase):
     """claude-plugin/ is the Claude Code plugin, listed by .claude-plugin/marketplace.json. It must do
     what `punk install-hooks` and `claude mcp add ... punk mcp` do, and only name real commands."""

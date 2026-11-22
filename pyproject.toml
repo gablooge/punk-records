@@ -37,6 +37,9 @@ Funding = "https://github.com/sponsors/gablooge"
 
 [project.scripts]
 punk = "punk_records.cli:main"
+# Same command under the package name, so `uvx punk-records mcp` and `pipx run punk-records` work
+# (how MCP clients start a server listed in the MCP Registry).
+punk-records = "punk_records.cli:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "punk_records.__version__" }
