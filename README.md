@@ -162,12 +162,18 @@ Paste one of these into Claude Code, Cursor, Codex or any agent that can run she
 
 ### Claude Code
 
-The plugin sets up both the MCP server and the session hooks in one step (Claude Code 2.1.275 or
-newer; punk itself still comes from `pipx install punk-records`):
+The plugin sets up both the MCP server and the session hooks (punk itself still comes from
+`pipx install punk-records`). Add this repository as a plugin marketplace, then install the plugin
+from it:
 
 ```
-/plugin install punk-records --marketplace gablooge/punk-records
+/plugin marketplace add gablooge/punk-records
+/plugin install punk-records@punk-records
 ```
+
+Claude Code 2.1.275 or newer also does both in one step:
+`/plugin install punk-records --marketplace gablooge/punk-records`. From a shell, the same commands
+start with `claude plugin` instead of `/plugin`.
 
 Or do the same by hand:
 

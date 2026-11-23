@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `punk session` exits 1, not 2, for a usage error (a bad `--agent` id or `PUNK_AGENT`, an unknown
+  step or option), so 2 always means a person must resolve a conflict. Other commands keep exit 2
+- README: the Claude Code plugin install also in two steps, `/plugin marketplace add
+  gablooge/punk-records` then `/plugin install punk-records@punk-records`, which works in every
+  Claude Code version; the one-step `--marketplace` form needs 2.1.275 or newer
+
 ## 0.6.0 - 2026-11-23
 
 For agent fleets: several punk processes can share a store, each change says which agent made it,

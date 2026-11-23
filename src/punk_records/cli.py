@@ -567,6 +567,19 @@ def _utf8_when_piped() -> None:
             reconfigure(encoding="utf-8")
 
 
+def _command(head: list[str]) -> str | None:
+    """The command name in `punk [--home X] [--agent Y] COMMAND ...`, before argparse runs."""
+    i = 0
+    while i < len(head) and head[i].startswith("-"):
+        i += 1 if "=" in head[i] or head[i] not in ("--home", "--agent") else 2
+    return head[i] if i < len(head) else None
+
+
+# `punk session` exits 2 only when a person must resolve a conflict. A runner's usage error (a bad
+# --agent id, a typo in the command) must not look like that, so it exits 1, "could not run".
+SESSION_USAGE_EXIT = 1
+
+
 def _split_git(argv: list[str]) -> tuple[list[str], list[str] | None]:
     """Split `punk [--home X] [--agent Y] git ARGS...`: argparse would take `git --help` for itself."""
     i = 0
@@ -581,7 +594,13 @@ def main(argv: list[str] | None = None) -> int:
     _utf8_when_piped()
     parser = build_parser()
     head, git_args = _split_git(list(sys.argv[1:] if argv is None else argv))
-    a = parser.parse_args(head)
+    session = _command(head) == "session"
+    try:
+        a = parser.parse_args(head)
+    except SystemExit as e:
+        if session and e.code == 2:
+            return SESSION_USAGE_EXIT
+        raise
     if git_args is not None:
         a.args = git_args
     if not getattr(a, "fn", None):
@@ -592,7 +611,7 @@ def main(argv: list[str] | None = None) -> int:
         return a.fn(store, a)
     except PunkError as e:
         print(f"punk: {e}", file=sys.stderr)
-        return 2
+        return SESSION_USAGE_EXIT if session else 2
     except KeyboardInterrupt:
         return 130
 
