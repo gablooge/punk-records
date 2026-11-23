@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 - 2026-11-23
+
+Exit codes agent runners can trust: `punk session` exits 2 only when a person must act, and says why.
 
 - `punk session` exits 2 ("a person must act") when the store cannot merge its remote, instead of 0
   with only "could not merge origin main:". The message names the cause: two stores started
