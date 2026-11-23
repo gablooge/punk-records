@@ -805,6 +805,31 @@ class TestSessionCommand(Base):
         self.assertIn("another punk process is using the store", err)
 
 
+    def test_usage_errors_fail_and_never_look_like_a_conflict(self):
+        """2 means a person must resolve a conflict; a typo in the runner's command is "could not run"."""
+        def punk(*args, **env):
+            r = subprocess.run([sys.executable, "-m", "punk_records", "--home", str(self.a.root), *args],
+                               capture_output=True, text=True,
+                               env={**os.environ, "PYTHONPATH": str(ROOT / "src"), **env})
+            return r.returncode, r.stderr
+
+        project = ["--project", str(self.a_app)]
+        for args, env, says in [
+            (["--agent", "bad id!", "session", "start", *project], {}, "invalid agent id"),
+            (["--agent=bad id!", "session", "end", *project], {}, "invalid agent id"),
+            (["session", "start", *project], {"PUNK_AGENT": "bad id!"}, "invalid agent id"),
+            (["session", "bogus", *project], {}, "invalid choice"),
+            (["session", "start", "--bogus", *project], {}, "unrecognized arguments"),
+            (["session", *project], {}, "required"),
+        ]:
+            with self.subTest(args=args, env=env):
+                code, err = punk(*args, **env)
+                self.assertEqual(code, 1)
+                self.assertIn(says, err)
+        # Other commands keep the usual exit code 2 for usage errors.
+        self.assertEqual(punk("--agent", "bad id!", "status")[0], 2)
+        self.assertEqual(punk("status", "--bogus")[0], 2)
+
 class TestMCPRegistry(unittest.TestCase):
     """server.json lists punk in the MCP Registry; the registry rejects a version whose PyPI README
     lacks the matching `mcp-name:` line, and clients start it as `uvx punk-records mcp`."""
@@ -873,6 +898,15 @@ class TestClaudePlugin(unittest.TestCase):
         self.assertTrue(named)
         self.assertEqual(sorted(named - set(sub.choices)), [])
 
+
+    def test_docs_install_with_real_claude_code_syntax(self):
+        """Both install forms the README gives name this repo and the marketplace's real name."""
+        market = self.load(".claude-plugin/marketplace.json")
+        (entry,) = market["plugins"]
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("/plugin marketplace add gablooge/punk-records", readme)
+        self.assertIn(f"/plugin install {entry['name']}@{market['name']}", readme)
+        self.assertIn(f"/plugin install {entry['name']} --marketplace gablooge/punk-records", readme)
 
 class TestMCP(Base):
     def test_tools(self):
