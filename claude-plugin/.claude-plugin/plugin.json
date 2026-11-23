@@ -1,6 +1,6 @@
 {
   "name": "punk-records",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Restores CLAUDE.md, AGENTS.md, napkins and rules when a session starts, saves and syncs them when it ends, and adds the punk-records MCP tools.",
   "author": {
     "name": "gablooge",

@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 - 2026-11-23
+
+For agent fleets: several punk processes can share a store, each change says which agent made it,
+and `punk session` gives any runner what the Claude Code hooks do.
 
 - README: "Agent fleets", how unattended agents use `punk session`, `--agent` and the store lock together
 - `--agent ID` (or `PUNK_AGENT`) records which agent made a change: every commit it makes ends with a
