@@ -2125,9 +2125,14 @@ class TestEncryption(Base):
         sid = a.track(pa)
         self.crypt(a).setup(str(self.remote))
         a.sync()
-        bin_dir = self.tmp / "bin-without-age"
-        bin_dir.mkdir()
-        (bin_dir / "git").symlink_to(shutil.which("git"))
+        git_dir = Path(shutil.which("git")).parent
+        if shutil.which("age", path=str(git_dir)):  # e.g. both in /opt/homebrew/bin: link git alone
+            bin_dir = self.tmp / "bin-without-age"
+            bin_dir.mkdir()
+            (bin_dir / "git").symlink_to(shutil.which("git"))
+        else:  # git's own folder keeps what it needs next to it (Windows: git.exe and its DLLs)
+            bin_dir = git_dir
+        self.assertIsNone(shutil.which("age", path=str(bin_dir)))
         env = {**os.environ, "PATH": str(bin_dir), "PYTHONPATH": str(ROOT / "src")}
 
         def punk(*args):
