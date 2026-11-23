@@ -26,7 +26,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .store import PunkError, Store, locked_store
+from .store import NeedsAttention, PunkError, Store, locked_store
 
 BUNDLE = "punk-records.bundle.age"
 REF = "refs/heads/main"
@@ -38,10 +38,10 @@ def key_path() -> Path:
     return Path(os.environ.get("PUNK_AGE_KEY") or Path.home() / ".config" / "punk" / "age.key").expanduser()
 
 
-def _need_age() -> None:
-    missing = [t for t in ("age", "age-keygen") if not shutil.which(t)]
+def _need_age(tools: tuple[str, ...] = ("age", "age-keygen")) -> None:
+    missing = [t for t in tools if not shutil.which(t)]
     if missing:
-        raise PunkError(f"encryption needs {' and '.join(missing)} on PATH: install age "
+        raise NeedsAttention(f"encryption needs {' and '.join(missing)} on PATH: install age "
                         f"(https://age-encryption.org, e.g. `brew install age` or `apt install age`)")
 
 
@@ -166,7 +166,9 @@ class Crypt:
             if not heads:
                 raise PunkError(f"the remote's {BUNDLE} contains no branches")
             mine = f"refs/heads/{self.store.branch()}"
-            self.store.pull(bundle, mine if mine in heads else heads[0])
+            url = self.git("remote", "get-url", "origin", check=False).stdout.strip() or None
+            self.store.pull(bundle, mine if mine in heads else heads[0], label="the encrypted remote",
+                            url=url and f"--encrypted {url}")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -200,6 +202,7 @@ class Crypt:
     @locked_store
     def exchange(self, push: bool = True, attempts: int = 3) -> bool:
         self._check_plain_remotes()
+        _need_age(("age",))
         for _ in range(attempts):
             head = self.remote_head()
             if head:

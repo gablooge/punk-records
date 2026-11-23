@@ -306,9 +306,14 @@ punk --agent acme/support session start --project ~/agents/support   # pull, the
 punk --agent acme/support session end --project ~/agents/support     # save, then pull and push
 ```
 
-- **Exit codes** the runner can act on: 0 done; 2 a conflict or blocked file that a person has to
-  resolve (local files are never overwritten); 1 it could not run (no store, project not tracked,
-  store busy). Whether the agent still runs after 1 or 2 is the runner's choice.
+- **Exit codes** the runner can act on: 0 done (a remote that cannot be reached is only a warning:
+  the next run may get through); 2 a person has to act: a conflict or blocked file (local files are
+  never overwritten), a store that cannot merge its remote, or `age` missing for an encrypted store;
+  1 it could not run (no store, project not tracked, store busy, a usage error). Whether the agent
+  still runs after 1 or 2 is the runner's choice.
+- **One store, cloned.** Start the first machine's store with `punk init <url>` and every other one
+  with the same command once the remote has the store, so they share one history. Two stores started
+  separately against an empty remote never merge; `session` says so and exits 2.
 - **Which agent learned what.** With `--agent` (or `PUNK_AGENT`), each commit ends with
   `Punk-Agent: acme/support`, so the store's history names the agent behind every change.
 - **Many agents, one store.** Commands that change the store take a lock, so agents on one machine
@@ -388,7 +393,7 @@ encrypt ...       encrypted remote: init URL | add-recipient KEY | status
 subscribe NAME URL  read another store read-only (unsubscribe NAME, subscriptions)
 install-hooks     sync automatically when Claude Code sessions start and end
 session start|end for agent runners (cron, CI): restore before a run, save + sync after it;
-                  exits 0 done, 2 a person must resolve a conflict, 1 failed
+                  exits 0 done, 2 a person must act (a conflict, a store that cannot merge), 1 failed
 watch             save automatically when memory files change
 ```
 
