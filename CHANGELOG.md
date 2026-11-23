@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 - 2026-11-23
 
 - `punk session` exits 1, not 2, for a usage error (a bad `--agent` id or `PUNK_AGENT`, an unknown
   step or option), so 2 always means a person must resolve a conflict. Other commands keep exit 2
