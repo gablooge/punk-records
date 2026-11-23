@@ -770,6 +770,37 @@ class TestSessionCommand(Base):
         self.assertEqual(code, 0)
         self.assertIn("could not reach the remote", err)
 
+    def test_a_store_started_separately_needs_a_person(self):
+        """#51: two stores made by `punk init` against an empty remote share no history and never merge."""
+        c = Store(self.tmp / "c-store")
+        c.init(machine="c", track_global=False)
+        git("remote", "add", "origin", str(self.remote), cwd=c.root)
+        c_app = self.project("c/web")
+        (c_app / "CLAUDE.md").write_text("- from c\n")
+        c.track(c_app)
+        code, out, err = self.session(c, "start", c_app)
+        self.assertEqual(code, 2, err)
+        self.assertIn("share no history", err)
+        self.assertIn(f"punk init {self.remote}", err)
+        self.assertNotIn("hint:", err)
+        self.assertEqual(out, "")
+        (c_app / "CLAUDE.md").write_text("- from c\n- more\n")
+        code, _, err = self.session(c, "end", c_app)
+        self.assertEqual(code, 2, err)
+        self.assertIn("saved locally but not shared", err)
+        self.assertIn("more", (c.root / "records" / self.sid / "CLAUDE.md").read_text())
+
+    def test_conflicting_store_changes_name_the_files(self):
+        (self.b.root / "punk.json").write_text('{"include": ["from-b/*.md"]}\n')
+        self.b.commit("b include")
+        self.b.sync()
+        (self.a.root / "punk.json").write_text('{"include": ["from-a/*.md"]}\n')
+        self.a.commit("a include")
+        code, _, err = self.session(self.a, "start", self.a_app)
+        self.assertEqual(code, 2, err)
+        self.assertIn("could not merge origin main: both changed punk.json", err)
+        self.assertEqual(self.a.git("status", "--porcelain").stdout.strip(), "")  # left as it was
+
     def test_a_conflict_needs_a_person(self):
         (self.b_app / "CLAUDE.md").write_text("- one\n- from b\n")
         self.b.sync()
@@ -806,7 +837,7 @@ class TestSessionCommand(Base):
 
 
     def test_usage_errors_fail_and_never_look_like_a_conflict(self):
-        """2 means a person must resolve a conflict; a typo in the runner's command is "could not run"."""
+        """2 means a person must act; a typo in the runner's command is "could not run"."""
         def punk(*args, **env):
             r = subprocess.run([sys.executable, "-m", "punk_records", "--home", str(self.a.root), *args],
                                capture_output=True, text=True,
@@ -2085,6 +2116,43 @@ class TestEncryption(Base):
         code, _, err = hooks.run(a, "session-end", json.dumps({"cwd": str(pa)}))
         self.assertEqual(code, 0, err)
         self.assertEqual(self.remote_files(), ["punk-records.bundle.age"])
+
+    def test_missing_age_needs_a_person(self):
+        """#49, #50: without age on PATH, start restores from the local store and end saves locally;
+        both say so and exit 2, and `punk sync` stops with a clear error, never a traceback."""
+        a, pa = self.machine("a")
+        (pa / "CLAUDE.md").write_text("from a\n")
+        sid = a.track(pa)
+        self.crypt(a).setup(str(self.remote))
+        a.sync()
+        git_dir = Path(shutil.which("git")).parent
+        if shutil.which("age", path=str(git_dir)):  # e.g. both in /opt/homebrew/bin: link git alone
+            bin_dir = self.tmp / "bin-without-age"
+            bin_dir.mkdir()
+            (bin_dir / "git").symlink_to(shutil.which("git"))
+        else:  # git's own folder keeps what it needs next to it (Windows: git.exe and its DLLs)
+            bin_dir = git_dir
+        self.assertIsNone(shutil.which("age", path=str(bin_dir)))
+        env = {**os.environ, "PATH": str(bin_dir), "PYTHONPATH": str(ROOT / "src")}
+
+        def punk(*args):
+            r = subprocess.run([sys.executable, "-m", "punk_records", "--home", str(a.root), *args],
+                               capture_output=True, text=True, env=env)
+            return r.returncode, r.stderr
+
+        code, err = punk("session", "start", "--project", str(pa))
+        self.assertEqual(code, 2, err)
+        self.assertIn("encryption needs age on PATH", err)
+        self.assertNotIn("Errno", err)
+        (pa / "CLAUDE.md").write_text("from a\nedited\n")
+        code, err = punk("session", "end", "--project", str(pa))
+        self.assertEqual(code, 2, err)
+        self.assertIn("saved locally but not shared: encryption needs age on PATH", err)
+        self.assertIn("edited", (a.root / "records" / sid / "CLAUDE.md").read_text())
+        code, err = punk("sync")
+        self.assertEqual(code, 2, err)
+        self.assertIn("encryption needs age on PATH", err)
+        self.assertNotIn("Traceback", err)
 
     def test_cli(self):
         from contextlib import redirect_stderr, redirect_stdout

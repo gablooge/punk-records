@@ -129,6 +129,15 @@ class PunkError(Exception):
     pass
 
 
+def _first_line_of(text: str) -> str:
+    return next((ln.strip() for ln in text.splitlines() if ln.strip()), "git failed")
+
+
+class NeedsAttention(PunkError):
+    """A problem that stays until a person acts (a store that cannot merge its remote, a missing tool),
+    unlike a remote that cannot be reached, which the next run may get past."""
+
+
 @dataclass
 class Action:
     kind: str  # add | update | delete | conflict | blocked | stale | missing | skipped
@@ -846,12 +855,31 @@ class Store:
         return actions
 
     # ------------------------------------------------------------------- sync
-    def pull(self, source: str, ref: str) -> None:
+    def pull(self, source: str, ref: str, label: str | None = None, url: str | None = None) -> None:
+        """Rebase the store onto `ref` from `source`. On failure the store is left as it was, and the
+        error names the cause: histories that share nothing, or the files both sides changed."""
         r = self.git("pull", "-q", "--rebase", "--no-autostash", source, ref, check=False)
-        if r.returncode != 0:
-            self.git("rebase", "--abort", check=False)
-            raise PunkError(f"could not merge {source} {ref}:\n{(r.stderr or r.stdout).strip()}\n"
-                            f"Resolve by hand in {self.root} (it is a normal git repo).")
+        if r.returncode == 0:
+            return
+        both = self.git("diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
+        self.git("rebase", "--abort", check=False)
+        what = label or f"{source} {ref}"
+        fetched = self.git("rev-parse", "-q", "--verify", "FETCH_HEAD", check=False).stdout.strip()
+        if fetched and self.git("merge-base", "HEAD", fetched, check=False).returncode == 1:
+            raise NeedsAttention(
+                f"could not merge {what}: this store and {what} were started separately (two "
+                f"`punk init` runs) and share no history.\nTo use the remote's records here: move "
+                f"{self.root} aside, run `punk init {url or '<remote url>'}`, track your projects again, "
+                f"then `punk status` (a file changed on both sides is shown as a conflict, never "
+                f"overwritten).")
+        if both:
+            shown = ", ".join(both[:5]) + (f" and {len(both) - 5} more" if len(both) > 5 else "")
+            raise NeedsAttention(
+                f"could not merge {what}: both changed {shown}\nThe store was left as it was. To merge "
+                f"by hand, run git in it (`punk git pull --rebase ...`), fix those files, continue the "
+                f"rebase, then `punk sync`.")
+        raise PunkError(f"could not merge {what}: {_first_line_of(r.stderr or r.stdout)}\n"
+                        f"{(r.stderr or r.stdout).strip()}")
 
     @locked
     def exchange(self, push: bool = True) -> bool:
@@ -865,7 +893,8 @@ class Store:
             return False
         branch = self.branch()
         if self.git("ls-remote", "--heads", remote, branch).stdout.strip():
-            self.pull(remote, branch)
+            url = self.git("remote", "get-url", remote, check=False).stdout.strip() or None
+            self.pull(remote, branch, url=url)
         if push:
             self.git("push", "-q", "-u", remote, branch)
         return True

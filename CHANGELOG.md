@@ -2,8 +2,14 @@
 
 ## 0.6.1 - 2026-11-23
 
+- `punk session` exits 2 ("a person must act") when the store cannot merge its remote, instead of 0
+  with only "could not merge origin main:". The message names the cause: two stores started
+  separately (no shared history, with the fix), or the files both sides changed (#51)
+- An encrypted store without `age` on PATH: `session start` restores from the local store and
+  `session end` saves locally, both say `age` is missing and exit 2; `punk sync` stops with that
+  error instead of a traceback (#49, #50)
 - `punk session` exits 1, not 2, for a usage error (a bad `--agent` id or `PUNK_AGENT`, an unknown
-  step or option), so 2 always means a person must resolve a conflict. Other commands keep exit 2
+  step or option), so 2 always means a person must act. Other commands keep exit 2
 - README: the Claude Code plugin install also in two steps, `/plugin marketplace add
   gablooge/punk-records` then `/plugin install punk-records@punk-records`, which works in every
   Claude Code version; the one-step `--marketplace` form needs 2.1.275 or newer

@@ -18,7 +18,7 @@ import re
 import sys
 from pathlib import Path
 
-from .store import GLOBAL_ID, PunkError, Store, _read_json, _write_text
+from .store import GLOBAL_ID, NeedsAttention, PunkError, Store, _read_json, _write_text
 
 # event -> (matcher, punk hook action, spinner text)
 EVENTS = {
@@ -169,6 +169,9 @@ def session(store: Store, action: str, cwd: Path, label: str = "") -> Outcome:
         if action == "start":
             try:
                 store.exchange(push=False)
+            except NeedsAttention as e:
+                out.attention = True
+                out.notes.append(f"punk: {e}\nRestored from the local store.")
             except PunkError as e:
                 out.notes.append(f"punk: could not reach the remote ({_first_line(e)}); using the local store")
             actions = store.restore(ids)
@@ -179,6 +182,9 @@ def session(store: Store, action: str, cwd: Path, label: str = "") -> Outcome:
             actions = store.save(ids)
             try:
                 store.exchange()
+            except NeedsAttention as e:
+                out.attention = True
+                out.notes.append(f"punk: saved locally but not shared: {e}")
             except PunkError as e:
                 out.notes.append(f"punk: saved locally but could not sync ({_first_line(e)})")
         bad = [a for a in actions if a.kind in ("conflict", "blocked")]

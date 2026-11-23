@@ -393,7 +393,8 @@ def cmd_session(store: Store, a) -> int:
     """For any agent runner (cron, CI, a scheduler): restore before a run, save and sync after it.
 
     Exit codes: 0 done (warnings, such as an unreachable remote, go to stderr); 2 a person must act
-    (a conflict or a blocked file, listed); 1 it could not run (no store, project not tracked, a busy
+    (a conflict or a blocked file, listed; a store that cannot merge its remote; age missing for an
+    encrypted store); 1 it could not run (no store, project not tracked, a busy
     store, an error). The agent can still run after 1 or 2; the runner decides.
     """
     from . import hooks
@@ -575,8 +576,9 @@ def _command(head: list[str]) -> str | None:
     return head[i] if i < len(head) else None
 
 
-# `punk session` exits 2 only when a person must resolve a conflict. A runner's usage error (a bad
-# --agent id, a typo in the command) must not look like that, so it exits 1, "could not run".
+# `punk session` exits 2 only when a person must act (a conflict, a store that cannot merge). A
+# runner's usage error (a bad --agent id, a typo in the command) must not look like that, so it
+# exits 1, "could not run".
 SESSION_USAGE_EXIT = 1
 
 
