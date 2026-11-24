@@ -299,6 +299,19 @@ Clients that browse the [MCP Registry](https://registry.modelcontextprotocol.io)
 | "Tidy up this project's CLAUDE.md in punk records: merge duplicates and group by topic." | `read_memory`, `write_memory` |
 | "Sync punk records." | `sync` (only with `punk mcp --allow-sync`) |
 
+The same phrases, one per line, to copy:
+
+```text
+Before you start, check punk records for what I already know about this repo.
+Search punk records across all my projects: how did I set up GitHub Actions caching?
+Which projects do I have memories for?
+Show me the napkin for github.com/me/api.
+Remember in punk records: integration tests need Docker running.
+Before we finish, save the gotchas you hit today to this project's CLAUDE.md in punk records.
+Tidy up this project's CLAUDE.md in punk records: merge duplicates and group by topic.
+Sync punk records.
+```
+
 `append_memory` and `write_memory` write to the store, commit, and update the local file. Secrets are
 refused, and only memory files (CLAUDE.md, AGENTS.md, napkins, rules) are written. `write_memory`
 replaces a whole file, so it needs the sha256 that `read_memory` reports and is refused if the file

@@ -953,6 +953,16 @@ class TestClaudePlugin(unittest.TestCase):
         self.assertTrue({"init", "track", "session", "encrypt", "subscribe"} <= named)
         self.assertEqual(sorted(named - set(sub.choices)), [])
 
+    def test_things_to_ask_block_matches_the_table(self):
+        """The copyable block under "Things to ask your agent" holds exactly the table's phrases."""
+        import re
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        section = readme[readme.index("### Things to ask your agent"):readme.index("### AI tools without MCP")]
+        rows = re.findall(r'^\| "(.+?)" \|', section, re.M)
+        (block,) = re.findall(r"```text\n(.*?)\n```", section, re.S)
+        self.assertGreaterEqual(len(rows), 8)
+        self.assertEqual(block.splitlines(), rows)
+
 class TestMCP(Base):
     def test_tools(self):
         s = Store(self.tmp / "s")

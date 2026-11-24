@@ -5,6 +5,8 @@
 - README: eight copy-and-paste prompts for setting punk up through an agent (first time, private
   backup, new laptop, Claude Code hooks, encryption, team store, unattended agents, end of session),
   as code blocks with GitHub's copy button; a test checks they name only real commands
+- README: the "Things to ask your agent" phrases also as one copyable block under the table, kept
+  identical to it by a test
 
 ## 0.6.1 - 2026-11-23
 
