@@ -187,6 +187,8 @@ def session(store: Store, action: str, cwd: Path, label: str = "") -> Outcome:
                 out.notes.append(f"punk: saved locally but not shared: {e}")
             except PunkError as e:
                 out.notes.append(f"punk: saved locally but could not sync ({_first_line(e)})")
+        out.notes += store.notices
+        store.notices.clear()
         bad = [a for a in actions if a.kind in ("conflict", "blocked")]
         out.notes += [f"punk: {a.kind} {a.sat}/{a.rel}" + (f" ({a.note})" if a.note else "") for a in bad]
         if bad:

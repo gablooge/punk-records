@@ -317,6 +317,7 @@ class Store:
     def __init__(self, root: Path | str | None = None, agent: str | None = None):
         self.root = Path(root).expanduser() if root else default_home()
         self._lock_depth = 0
+        self.notices: list[str] = []  # things a command did that the user should hear about
         # who is writing, for tools that show which agent learned what (docs/store-format.md)
         self.agent = validate_agent(agent) if agent else None
 
@@ -429,7 +430,13 @@ class Store:
             if r.returncode != 0:
                 raise PunkError(f"git clone failed:\n{r.stderr.strip()}")
             if self.git("rev-parse", "--verify", "HEAD", check=False).returncode != 0:
-                self.git("symbolic-ref", "HEAD", "refs/heads/main")  # empty remote
+                # Nothing checked out: an empty remote, or one whose HEAD names another branch (a bare
+                # repo made with git's default `master`, while punk pushes `main`). Use its main if it
+                # has one, so this store continues that history instead of starting its own (#51).
+                if self.git("rev-parse", "-q", "--verify", "refs/remotes/origin/main", check=False).returncode == 0:
+                    self.git("checkout", "-q", "-B", "main", "--track", "origin/main")
+                else:
+                    self.git("symbolic-ref", "HEAD", "refs/heads/main")  # empty remote
         else:
             self.root.mkdir(parents=True, exist_ok=True)
             self.git("init", "-q")
@@ -822,7 +829,9 @@ class Store:
                     continue  # store unchanged; local edits are waiting for `punk save`
                 safe = (loc is None and st is None) or (st is not None and loc == st["local"])
                 if not safe and not force:
-                    note = "deleted here, changed in the store" if loc is None else "edited here and in the store"
+                    note = ("deleted here, changed in the store" if loc is None
+                            else "differs from the store copy; `punk restore --force` or `punk save --force`"
+                            if st is None else "edited here and in the store")
                     actions.append(Action("conflict", sid, rel, note))
                     continue
                 note = ""
@@ -856,22 +865,23 @@ class Store:
 
     # ------------------------------------------------------------------- sync
     def pull(self, source: str, ref: str, label: str | None = None, url: str | None = None) -> None:
-        """Rebase the store onto `ref` from `source`. On failure the store is left as it was, and the
-        error names the cause: histories that share nothing, or the files both sides changed."""
-        r = self.git("pull", "-q", "--rebase", "--no-autostash", source, ref, check=False)
+        """Bring `ref` from `source` into the store: rebase onto it, or join it when this store was
+        started on its own (no shared history). On failure the store is left as it was, and the error
+        names the cause."""
+        what = label or f"{source} {ref}"
+        r = self.git("fetch", "-q", source, ref, check=False)
+        if r.returncode != 0:
+            raise PunkError(f"could not fetch {what}: {_first_line_of(r.stderr or r.stdout)}\n"
+                            f"{(r.stderr or r.stdout).strip()}")
+        theirs = self.git("rev-parse", "FETCH_HEAD").stdout.strip()
+        if self.git("merge-base", "HEAD", theirs, check=False).returncode == 1:
+            self._join(theirs, what, url)
+            return
+        r = self.git("rebase", "-q", "--no-autostash", theirs, check=False)
         if r.returncode == 0:
             return
         both = self.git("diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
         self.git("rebase", "--abort", check=False)
-        what = label or f"{source} {ref}"
-        fetched = self.git("rev-parse", "-q", "--verify", "FETCH_HEAD", check=False).stdout.strip()
-        if fetched and self.git("merge-base", "HEAD", fetched, check=False).returncode == 1:
-            raise NeedsAttention(
-                f"could not merge {what}: this store and {what} were started separately (two "
-                f"`punk init` runs) and share no history.\nTo use the remote's records here: move "
-                f"{self.root} aside, run `punk init {url or '<remote url>'}`, track your projects again, "
-                f"then `punk status` (a file changed on both sides is shown as a conflict, never "
-                f"overwritten).")
         if both:
             shown = ", ".join(both[:5]) + (f" and {len(both) - 5} more" if len(both) > 5 else "")
             raise NeedsAttention(
@@ -880,6 +890,56 @@ class Store:
                 f"rebase, then `punk sync`.")
         raise PunkError(f"could not merge {what}: {_first_line_of(r.stderr or r.stdout)}\n"
                         f"{(r.stderr or r.stdout).strip()}")
+
+    def _join(self, theirs: str, what: str, url: str | None) -> None:
+        """Join a punk store that shares no history with this one (each began with its own `punk init`,
+        #51). The result is one commit on top of the remote's history: every file the remote has comes
+        from the remote, files only this store has are added. History stays linear, so later pulls rebase
+        as usual. Sync state is dropped wherever the store copy changed, so a
+        memory that differs between this machine and the remote is a conflict, never overwritten. The
+        old head stays reachable under refs/punk/before-join/."""
+        top = set(self.git("ls-tree", "--name-only", theirs).stdout.splitlines())
+        if not top & {"punk.json", "satellites"}:
+            raise NeedsAttention(
+                f"could not merge {what}: it is not a punk store (no punk.json or satellites/) and shares "
+                f"no history with this one. The store was left as it was; check the remote with "
+                f"`punk git remote -v`.")
+        ours = self.git("rev-parse", "HEAD").stdout.strip()
+        backup = f"refs/punk/before-join/{time.strftime('%Y%m%d-%H%M%S')}-{ours[:7]}"
+        self.git("update-ref", backup, ours)
+        remote_paths = set(self.git("ls-tree", "-r", "-z", "--name-only", theirs).stdout.split("\0"))
+        only_here = [ln for ln in self.git("ls-tree", "-r", "-z", ours).stdout.split("\0")
+                     if ln and ln.split("\t", 1)[1] not in remote_paths]
+        self.git("read-tree", theirs)
+        if only_here:
+            r = subprocess.run(["git", "-C", str(self.root), "update-index", "-z", "--index-info"],
+                               input=("\0".join(only_here) + "\0").encode(), capture_output=True)
+            if r.returncode != 0:
+                self.git("read-tree", ours)
+                raise PunkError(f"could not join {what}: {r.stderr.decode(errors='replace').strip()}")
+        tree = self.git("write-tree").stdout.strip()
+        message = (f"join {what}\n\nThis store was started on its own (its history stays on that machine "
+                   f"under refs/punk/before-join/). Files only it had are added; for the rest the remote's "
+                   f"copy is used.")
+        if self.agent:
+            message += f"\n\n{AGENT_TRAILER}: {self.agent}"
+        merged = self.git("commit-tree", tree, "-p", theirs, "-m", message).stdout.strip()
+        self.git("reset", "-q", "--hard", merged)
+        state = self.load_state()
+        for sid, files in state["synced"].items():
+            for rel in [rel for rel, st in files.items()
+                        if not (self.records / sid / rel).is_file()
+                        or sha((self.records / sid / rel).read_bytes()) != st.get("record")]:
+                del files[rel]
+        for sid, base in state["links"].items():
+            stored = self.links(sid)
+            for rel in [rel for rel, target in base.items() if stored.get(rel) != target]:
+                del base[rel]
+        self.save_state(state)
+        self.notices.append(
+            f"punk: joined {what}: this store was started on its own, so it now continues the remote's "
+            f"history (files only it had are added). A memory that differs from the remote's is shown as "
+            f"a conflict. The old store is kept at {backup}.")
 
     @locked
     def exchange(self, push: bool = True) -> bool:

@@ -610,7 +610,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         store = Store(a.home or os.environ.get("PUNK_HOME"), agent=a.agent or os.environ.get("PUNK_AGENT") or None)
-        return a.fn(store, a)
+        try:
+            return a.fn(store, a)
+        finally:
+            for notice in store.notices:
+                print(notice, file=sys.stderr)
     except PunkError as e:
         print(f"punk: {e}", file=sys.stderr)
         return SESSION_USAGE_EXIT if session else 2
