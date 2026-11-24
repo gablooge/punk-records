@@ -750,7 +750,8 @@ class TestSessionCommand(Base):
         self.assertEqual(out.strip(), f"punk: session start done for {self.sid}")
         self.assertEqual((self.a_app / "CLAUDE.md").read_text(), "- one\n- from b\n")
         (self.a_app / "CLAUDE.md").write_text("- one\n- from b\n- from a\n")
-        self.assertEqual(self.session(self.a, "end", self.a_app)[0], 0)
+        code, _, err = self.session(self.a, "end", self.a_app)
+        self.assertEqual((code, err), (0, ""))
         self.b.sync()
         self.assertEqual((self.b_app / "CLAUDE.md").read_text(), "- one\n- from b\n- from a\n")
 
@@ -770,25 +771,96 @@ class TestSessionCommand(Base):
         self.assertEqual(code, 0)
         self.assertIn("could not reach the remote", err)
 
-    def test_a_store_started_separately_needs_a_person(self):
-        """#51: two stores made by `punk init` against an empty remote share no history and never merge."""
-        c = Store(self.tmp / "c-store")
-        c.init(machine="c", track_global=False)
+    def separate_store(self, name):
+        """A store made by its own `punk init`, later pointed at the shared remote (#51)."""
+        c = Store(self.tmp / f"{name}-store")
+        c.init(machine=name, track_global=False)
         git("remote", "add", "origin", str(self.remote), cwd=c.root)
-        c_app = self.project("c/web")
+        return c
+
+    def test_init_continues_main_when_the_remote_head_names_another_branch(self):
+        """A bare remote made with git's default branch (HEAD -> master) still gets punk's `main`:
+        `punk init <url>` must continue that history, not start its own."""
+        head = subprocess.run(["git", "--git-dir", str(self.remote), "symbolic-ref", "HEAD"],
+                              capture_output=True, text=True).stdout.strip()
+        if head == "refs/heads/main":  # this git's default branch is main; make the case happen
+            subprocess.run(["git", "--git-dir", str(self.remote), "symbolic-ref", "HEAD", "refs/heads/master"],
+                           check=True)
+        c = Store(self.tmp / "c-store")
+        c.init(str(self.remote), machine="c", track_global=False)
+        remote_main = subprocess.run(["git", "--git-dir", str(self.remote), "rev-parse", "main"],
+                                     capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(c.git("rev-parse", "HEAD").stdout.strip(), remote_main)
+        self.assertEqual(c.branch(), "main")
+        self.assertTrue((c.root / "records" / self.sid / "CLAUDE.md").is_file())
+
+    def test_a_store_started_separately_joins_the_remote(self):
+        """#51: a store from its own `punk init` adopts the remote's history instead of never merging.
+        What only one side has is kept; a file that differs is a conflict; nothing local is overwritten."""
+        (self.a_app / "AGENTS.md").write_text("- agents from a\n")
+        self.a.sync()
+        c = self.separate_store("c")
+        c_app = self.project("c/web")  # same git remote as a/app, another folder name
         (c_app / "CLAUDE.md").write_text("- from c\n")
+        (c_app / ".claude").mkdir()
+        (c_app / ".claude" / "napkin.md").write_text("- napkin from c\n")
+        other = self.project("c/other", remote="git@github.com:me/other.git")
+        (other / "CLAUDE.md").write_text("- other from c\n")
         c.track(c_app)
+        other_id = c.track(other)
+        c.save()
+        before = c.git("rev-parse", "HEAD").stdout.strip()
+
         code, out, err = self.session(c, "start", c_app)
-        self.assertEqual(code, 2, err)
-        self.assertIn("share no history", err)
-        self.assertIn(f"punk init {self.remote}", err)
-        self.assertNotIn("hint:", err)
-        self.assertEqual(out, "")
-        (c_app / "CLAUDE.md").write_text("- from c\n- more\n")
+        self.assertEqual(code, 2, err)  # CLAUDE.md differs on the two sides
+        self.assertIn("joined", err)
+        self.assertIn(f"punk: conflict {self.sid}/CLAUDE.md (differs from the store copy", err)
+        self.assertEqual((c_app / "CLAUDE.md").read_text(), "- from c\n")  # never overwritten
+        self.assertEqual((c_app / "AGENTS.md").read_text(), "- agents from a\n")  # the remote's, restored
+        backups = c.git("for-each-ref", "--format=%(objectname)", "refs/punk/before-join/").stdout.split()
+        self.assertEqual(backups, [before])
+        remote_head = subprocess.run(["git", "--git-dir", str(self.remote), "rev-parse", "main"],
+                                     capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(c.git("log", "-1", "--format=%P").stdout.split(), [remote_head])  # linear
+        records = c.root / "records"
+        self.assertEqual((records / self.sid / "CLAUDE.md").read_text(), "- one\n")  # the remote's copy
+        joined = set(c.git("ls-tree", "-r", "--name-only", "HEAD").stdout.splitlines())
+        for kept in (f"records/{self.sid}/.claude/napkin.md", f"records/{other_id}/CLAUDE.md",
+                     f"satellites/{other_id}.json"):  # only this store had them: in the join commit
+            self.assertIn(kept, joined)
+        self.assertEqual(c.git("status", "--porcelain").stdout, "")
+        self.assertEqual(json.loads((c.root / "satellites" / f"{self.sid}.json").read_text())["name"], "app")
+
         code, _, err = self.session(c, "end", c_app)
+        self.assertEqual(code, 2, err)  # still the one conflict, and now shared
+        self.assertNotIn("could not", err)
+        code, _, err = self.session(self.a, "start", self.a_app)
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.a_app / ".claude" / "napkin.md").read_text(), "- napkin from c\n")
+        self.assertEqual((self.a_app / "CLAUDE.md").read_text(), "- one\n")
+
+        c.save([self.sid], force=True)  # c decides its CLAUDE.md wins
+        code, _, err = self.session(c, "end", c_app)
+        self.assertEqual(code, 0, err)
+        code, _, err = self.session(self.a, "start", self.a_app)
+        self.assertEqual((code, (self.a_app / "CLAUDE.md").read_text()), (0, "- from c\n"), err)
+
+    def test_a_remote_that_is_not_a_punk_store_is_never_joined(self):
+        other = self.tmp / "other.git"
+        git("init", "-q", "--bare", str(other), cwd=self.tmp)
+        work = self.tmp / "other-work"
+        git("clone", "-q", str(other), str(work), cwd=self.tmp)
+        (work / "notes.txt").write_text("not punk\n")
+        git("add", "-A", cwd=work)
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x", cwd=work)
+        git("push", "-q", "origin", "HEAD:main", cwd=work)
+        git("remote", "set-url", "origin", str(other), cwd=self.a.root)
+        head = self.a.git("rev-parse", "HEAD").stdout.strip()
+        code, _, err = self.session(self.a, "start", self.a_app)
         self.assertEqual(code, 2, err)
-        self.assertIn("saved locally but not shared", err)
-        self.assertIn("more", (c.root / "records" / self.sid / "CLAUDE.md").read_text())
+        self.assertIn("is not a punk store", err)
+        self.assertEqual(self.a.git("rev-parse", "HEAD").stdout.strip(), head)
+        self.assertEqual(self.a.git("for-each-ref", "refs/punk/").stdout, "")
 
     def test_conflicting_store_changes_name_the_files(self):
         (self.b.root / "punk.json").write_text('{"include": ["from-b/*.md"]}\n')

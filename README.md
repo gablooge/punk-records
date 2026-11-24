@@ -382,8 +382,8 @@ punk --agent acme/support session end --project ~/agents/support     # save, the
   1 it could not run (no store, project not tracked, store busy, a usage error). Whether the agent
   still runs after 1 or 2 is the runner's choice.
 - **One store, cloned.** Start the first machine's store with `punk init <url>` and every other one
-  with the same command once the remote has the store, so they share one history. Two stores started
-  separately against an empty remote never merge; `session` says so and exits 2.
+  with the same command once the remote has the store. A store that was started on its own and
+  pointed at the remote later joins it on the next sync (see below).
 - **Which agent learned what.** With `--agent` (or `PUNK_AGENT`), each commit ends with
   `Punk-Agent: acme/support`, so the store's history names the agent behind every change.
 - **Many agents, one store.** Commands that change the store take a lock, so agents on one machine
@@ -397,6 +397,11 @@ punk --agent acme/support session end --project ~/agents/support     # save, the
 
 - **The store is a git repo.** Every save is a commit, so `punk git log -p` shows how your agents'
   knowledge changed over time, and nothing is ever truly lost.
+- **A store started on its own joins the remote.** If this machine ran `punk init` before it knew
+  the remote, its store has a history of its own. The next sync takes the remote's history and adds
+  the files only this store had; for files both have, the remote's copy is used, and a memory that
+  differs on this machine is reported as a conflict, never overwritten. The old history stays on
+  this machine under `refs/punk/before-join/`. A remote that is not a punk store is never joined.
 - **Three-way per file.** Punk records the local and store hash of each file at its last sync, which
   lets it tell "edited here" apart from "edited on another machine". When both sides changed, it
   reports a **conflict** and leaves both copies alone. `punk diff <satellite> <path>` shows what

@@ -71,9 +71,14 @@ from two machines by keeping both sides' lines (`merge=union`).
 
 Every change is a commit on the branch. The messages `punk` writes start with what happened:
 `init punk records on <machine>`, `track <id>`, `save ...`, `remember in <id>/<path>`,
-`write <id>/<path>`, `dedupe ...`, `purge <id>`. The commit author is the machine's git identity,
+`write <id>/<path>`, `dedupe ...`, `purge <id>`, `join <remote>`. The commit author is the machine's git identity,
 or `punk@<machine>` when it has none. The history of one satellite is the history of
 `records/<id>/` (and its `satellites/<id>.json`).
+
+History is linear. A store that was started on its own (its own `punk init`) and then pointed at a
+remote joins it with one `join <remote>` commit on top of the remote's history: the remote's files,
+plus the files only that store had. Its earlier commits are not pushed; they stay on that machine
+under `refs/punk/before-join/`.
 
 When a command runs with `--agent <id>` or with `PUNK_AGENT` set (an agent in a fleet, for
 example), each of its commits ends with a git trailer naming that agent, `Punk-Agent: <id>`:

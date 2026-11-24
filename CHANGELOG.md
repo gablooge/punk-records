@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A store started on its own (`punk init` before the remote was known) joins the remote on the next
+  sync instead of never merging: it continues the remote's history, adds the files only it had, and
+  reports a memory that differs as a conflict. The old history is kept under
+  `refs/punk/before-join/`. A remote that is not a punk store is never joined, where before its
+  history could be silently rebased onto (#51)
+- `punk init <url>` with a bare remote whose HEAD names another branch (git's default `master`)
+  now continues the remote's `main` instead of starting a store with its own history
 - README: eight copy-and-paste prompts for setting punk up through an agent (first time, private
   backup, new laptop, Claude Code hooks, encryption, team store, unattended agents, end of session),
   as code blocks with GitHub's copy button; a test checks they name only real commands
