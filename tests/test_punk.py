@@ -939,6 +939,20 @@ class TestClaudePlugin(unittest.TestCase):
         self.assertIn(f"/plugin install {entry['name']}@{market['name']}", readme)
         self.assertIn(f"/plugin install {entry['name']} --marketplace gablooge/punk-records", readme)
 
+    def test_readme_prompts_name_real_commands(self):
+        """The copy-and-paste prompts in the README only name punk commands that exist."""
+        import re
+        sub = next(a for a in cli.build_parser()._actions if isinstance(a.choices, dict))
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        section = readme[readme.index("### Let your agent set it up"):readme.index("### Claude Code\n")]
+        blocks = re.findall(r"```text\n(.*?)```", section, re.S)
+        self.assertGreaterEqual(len(blocks), 8)
+        named = set()
+        for block in blocks:
+            named |= set(re.findall(r"`punk (?:--agent \S+ )?([a-z][a-z-]*)", block.replace("\n", " ")))
+        self.assertTrue({"init", "track", "session", "encrypt", "subscribe"} <= named)
+        self.assertEqual(sorted(named - set(sub.choices)), [])
+
 class TestMCP(Base):
     def test_tools(self):
         s = Store(self.tmp / "s")

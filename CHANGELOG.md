@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- README: eight copy-and-paste prompts for setting punk up through an agent (first time, private
+  backup, new laptop, Claude Code hooks, encryption, team store, unattended agents, end of session),
+  as code blocks with GitHub's copy button; a test checks they name only real commands
+
 ## 0.6.1 - 2026-11-23
 
 Exit codes agent runners can trust: `punk session` exits 2 only when a person must act, and says why.

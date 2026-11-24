@@ -146,19 +146,76 @@ imports merge the same way online pulls do.
 
 ### Let your agent set it up
 
-Paste one of these into Claude Code, Cursor, Codex or any agent that can run shell commands:
+Copy one of these into Claude Code, Cursor, Codex or any agent that can run shell commands (the copy
+button is at the top right of each block). Replace the parts in `<angle brackets>`.
 
-> Install https://pypi.org/project/punk-records with pipx, run `punk init`, track this repo with
-> `punk track .`, save, and register its MCP server for Claude Code for all my projects
-> (`claude mcp add --scope user punk-records -- punk mcp`). Then run `punk scan` and tell me which
-> memory files it found.
+**First time, on this machine**
 
-> I'm setting up a new laptop. Use https://pypi.org/project/punk-records to bring back my agent
-> memories: `punk init git@github.com:me/my-punk-records.git`, then track every repo under ~/code
-> and run `punk sync`.
+```text
+Install punk-records (https://pypi.org/project/punk-records) with pipx, run `punk init`, track this
+repo with `punk track .` and run `punk save`. Register its MCP server for Claude Code in all my
+projects with `claude mcp add --scope user punk-records -- punk mcp`. Then run `punk scan` and tell
+me which memory files it found.
+```
 
-> Use punk-records (https://pypi.org/project/punk-records) to keep this project's CLAUDE.md and
-> AGENTS.md in sync across my machines automatically: run `punk install-hooks`.
+**Back up to a private repo**
+
+```text
+Create a private GitHub repo named my-punk-records (`gh repo create my-punk-records --private`),
+add it to my punk store with `punk git remote add origin <its ssh url>`, and run `punk sync`.
+Tell me what was pushed.
+```
+
+**A new laptop**
+
+```text
+I'm setting up a new laptop. Install punk-records (https://pypi.org/project/punk-records) with
+pipx, run `punk init <my store's git url>`, then `punk track` every git repo under ~/code and run
+`punk sync`. List any conflicts and don't overwrite local files.
+```
+
+**Sync automatically in Claude Code**
+
+```text
+Keep this project's CLAUDE.md and AGENTS.md in sync across my machines with punk-records
+(https://pypi.org/project/punk-records): install it with pipx if `punk` is missing, run
+`punk init` if there is no store, `punk track .`, then `punk install-hooks` so memories are
+restored when a session starts and saved when it ends.
+```
+
+**Encrypt the remote (untrusted host)**
+
+```text
+Encrypt my punk-records remote: install age if it is missing, then run
+`punk encrypt init <git url of a private repo for it>` and `punk sync`. Tell me where the key
+file is and remind me to back it up; without it the remote cannot be read.
+```
+
+**Read my team's store**
+
+```text
+Subscribe to my team's punk-records store, read-only: `punk subscribe <team name> <team store git
+url>`, then show me `punk context .` for this repo so I can see the team's rules next to mine.
+```
+
+**An agent that runs unattended (cron, CI)**
+
+```text
+This agent runs unattended from <cron / CI / scheduler>. Make it keep what it learns with
+punk-records 0.6.1 or newer: run `punk track <the agent's project dir>` once, then wrap each run in
+`punk --agent <team>/<agent> session start --project <dir>` before and
+`punk --agent <team>/<agent> session end --project <dir>` after. Exit 0 is done, 2 means a person
+must act (log it and alert), 1 means punk could not run (log it). Neither may change the agent's
+own exit code.
+```
+
+**Before you finish a session**
+
+```text
+Before we finish: save the gotchas you hit today to this project's CLAUDE.md in punk records
+(the `append_memory` tool, or `punk remember "<the lesson>"`), one line each, no duplicates of what
+is already there.
+```
 
 ### Claude Code
 
