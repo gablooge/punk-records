@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.6.2 - 2026-11-26
+
+A store started on its own now joins its remote by itself, with nothing to rebuild by hand.
 
 - A store started on its own (`punk init` before the remote was known) joins the remote on the next
   sync instead of never merging: it continues the remote's history, adds the files only it had, and
