@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Xcode: memories, commands, agents and skills of the agents run inside Xcode (Claude Agent,
+  Codex, Gemini, under `~/Library/Developer/Xcode/CodingAssistant/`) are part of the global
+  satellite; Xcode's MCP list and the agents' settings and credentials are not. README: "Xcode"
+  (memories, the `mcp-servers.json` entry, syncing, driving Xcode from the terminal)
+
 ## 0.6.2 - 2026-11-26
 
 A store started on its own now joins its remote by itself, with nothing to rebuild by hand.

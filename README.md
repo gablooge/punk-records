@@ -49,7 +49,7 @@ offline network.
 | Any project | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENT.md`, `GEMINI.md`, `napkin.md`, `CONVENTIONS.md`, `.cursorrules`, `.windsurfrules`, `.clinerules`, `.goosehints` (anywhere in the tree) |
 | | `.claude/*.md` (napkins, commands, agents), `.claude/skills/*`, `.cursor/rules/*`, `.windsurf/rules/*`, `.clinerules/*`, `.roo/rules/*`, `.kiro/steering/*`, `.github/copilot-instructions.md`, `.github/instructions/*.md` |
 | | Claude Code auto memory, `~/.claude/projects/<project>/memory/*.md` (stored as `@claude-memory/...`; restored into the matching folder for the project's path on each machine, and shared by its worktrees) |
-| Global (`$HOME`) | `~/.claude/CLAUDE.md`, `~/.claude/napkin.md`, `~/.claude/{commands,agents,skills}/*`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.config/goose/.goosehints` |
+| Global (`$HOME`) | `~/.claude/CLAUDE.md`, `~/.claude/napkin.md`, `~/.claude/{commands,agents,skills}/*`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.config/goose/.goosehints`, and the same for agents run inside Xcode under `~/Library/Developer/Xcode/CodingAssistant/` (`ClaudeAgentConfig/`, `codex/`, `gemini/`) |
 
 Run `punk scan` to see what would be captured. To add your own patterns, put globs in `punk.json`
 inside the store (`{"include": ["docs/ai/*.md"], "exclude": []}`).
@@ -282,6 +282,29 @@ Clients that browse the [MCP Registry](https://registry.modelcontextprotocol.io)
   `claude mcp add --scope user punk-records -- punk mcp` apply inside VS Code too.
 - **VS Code agent mode (Copilot):** run **MCP: Add Server** from the Command Palette, choose
   **Command (stdio)** and enter `punk mcp`.
+
+### Xcode
+
+Xcode 26.3 and newer run Claude Agent, Codex and Gemini inside Xcode with their own configuration
+under `~/Library/Developer/Xcode/CodingAssistant/` instead of `~/.claude`, `~/.codex` and `~/.gemini`.
+
+- **Memories:** project memories (`CLAUDE.md`, `AGENTS.md`, ...) are in the project folder, so
+  `punk track <project>` covers them as for any editor. The global memories, commands, agents and
+  skills in `CodingAssistant/ClaudeAgentConfig/`, `codex/AGENTS.md` and `gemini/GEMINI.md` are part
+  of the global satellite. Xcode's MCP list and the agents' settings and credentials are not synced.
+- **MCP tools:** add punk to `~/Library/Developer/Xcode/CodingAssistant/mcp-servers.json`. Xcode
+  does not use your shell's `PATH`, so give the full path from `which punk`:
+
+  ```json
+  { "mcpServers": { "punk-records": { "command": "/opt/homebrew/bin/punk", "args": ["mcp"] } } }
+  ```
+
+- **Sync:** `punk install-hooks` writes `~/.claude/settings.json`, which agents run inside Xcode do
+  not read. Run `punk watch --sync-every 300` or the VS Code extension, or `punk sync` by hand.
+- **Or drive Xcode from the terminal:** connect Claude Code or Codex to Xcode with
+  `claude mcp add --transport stdio xcode -- xcrun mcpbridge` (Apple's
+  [external agents](https://developer.apple.com/documentation/xcode/giving-external-agents-access-to-xcode)
+  guide); the punk hooks and MCP setup above then work as usual.
 
 ### Things to ask your agent
 

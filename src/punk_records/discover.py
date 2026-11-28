@@ -40,6 +40,10 @@ PROJECT_GLOBS = [
     ".claude/skills/*",
 ]
 
+# Agents run inside Xcode (26.3+) keep their config here, relative to $HOME, instead of ~/.claude,
+# ~/.codex and ~/.gemini.
+XCODE_AGENTS = "Library/Developer/Xcode/CodingAssistant"
+
 # User-level memories, relative to $HOME. Only these locations are read.
 GLOBAL_GLOBS = [
     ".claude/CLAUDE.md",
@@ -50,6 +54,15 @@ GLOBAL_GLOBS = [
     ".codex/AGENTS.md",
     ".gemini/GEMINI.md",
     ".config/goose/.goosehints",
+    # Xcode's agents: only memories, not Xcode's mcp-servers.json or the agents' settings,
+    # credentials or sessions.
+    f"{XCODE_AGENTS}/ClaudeAgentConfig/CLAUDE.md",
+    f"{XCODE_AGENTS}/ClaudeAgentConfig/napkin.md",
+    f"{XCODE_AGENTS}/ClaudeAgentConfig/commands/*",
+    f"{XCODE_AGENTS}/ClaudeAgentConfig/agents/*",
+    f"{XCODE_AGENTS}/ClaudeAgentConfig/skills/*",
+    f"{XCODE_AGENTS}/codex/AGENTS.md",
+    f"{XCODE_AGENTS}/gemini/GEMINI.md",
 ]
 
 # Directories never descended into.

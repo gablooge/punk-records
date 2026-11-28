@@ -320,6 +320,43 @@ class TestSync(Base):
         self.assertEqual(s.memories("global"), [("global", ".claude/CLAUDE.md")])
         self.assertIn("short answers", s.context(self.tmp))
 
+    def test_xcode_agent_memories(self):
+        """Agents run inside Xcode keep their own config under ~/Library/Developer/Xcode/CodingAssistant
+        (Claude Agent, Codex, Gemini); their memories, commands, agents and skills are global memories.
+        Xcode's MCP list and the agents' settings, credentials and sessions are not."""
+        home = Path(os.environ["HOME"])
+        ca = home / "Library" / "Developer" / "Xcode" / "CodingAssistant"
+        files = {
+            "ClaudeAgentConfig/CLAUDE.md": "- Use Swift Testing, not XCTest\n",
+            "ClaudeAgentConfig/napkin.md": "- previews need a simulator\n",
+            "ClaudeAgentConfig/commands/ship.md": "Build and archive.\n",
+            "ClaudeAgentConfig/agents/reviewer.md": "Review SwiftUI.\n",
+            "ClaudeAgentConfig/skills/swiftui/SKILL.md": "# SwiftUI\n",
+            "codex/AGENTS.md": "- Run xcodebuild test\n",
+            "gemini/GEMINI.md": "- Prefer async/await\n",
+        }
+        never = {
+            "mcp-servers.json": '{"mcpServers": {}}\n',
+            "ClaudeAgentConfig/.claude": '{"projects": {}}\n',
+            "ClaudeAgentConfig/settings.json": "{}\n",
+            "ClaudeAgentConfig/projects/x/session.jsonl": "{}\n",
+            "ClaudeAgentConfig/projects/x/memory/MEMORY.md": "- a project's auto memory\n",
+            "codex/auth.json": '{"token": "x"}\n',
+            "codex/config.toml": "model = 'x'\n",
+        }
+        for rel, text in {**files, **never}.items():
+            (ca / rel).parent.mkdir(parents=True, exist_ok=True)
+            (ca / rel).write_text(text)
+        prefix = "Library/Developer/Xcode/CodingAssistant/"
+        self.assertEqual(sorted(scan(home, "global").files), sorted(prefix + r for r in files))
+        s = Store(self.tmp / "s")
+        s.init()
+        s.save()
+        self.assertEqual((s.records / "global" / prefix / "ClaudeAgentConfig" / "CLAUDE.md").read_text(),
+                         "- Use Swift Testing, not XCTest\n")
+        for rel in never:
+            self.assertFalse((s.records / "global" / prefix / rel).exists(), rel)
+
 
 class TestClaudeAutoMemory(Base):
     """Claude Code's auto memory lives outside the project, keyed by the repo's path on this machine."""
