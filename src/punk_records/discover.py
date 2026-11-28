@@ -40,7 +40,7 @@ PROJECT_GLOBS = [
     ".claude/skills/*",
 ]
 
-# Agents run inside Xcode (26.3+) keep their config here, relative to $HOME, instead of ~/.claude,
+# Agents run inside Xcode keep their config here, relative to $HOME, instead of ~/.claude,
 # ~/.codex and ~/.gemini.
 XCODE_AGENTS = "Library/Developer/Xcode/CodingAssistant"
 

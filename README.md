@@ -49,7 +49,7 @@ offline network.
 | Any project | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENT.md`, `GEMINI.md`, `napkin.md`, `CONVENTIONS.md`, `.cursorrules`, `.windsurfrules`, `.clinerules`, `.goosehints` (anywhere in the tree) |
 | | `.claude/*.md` (napkins, commands, agents), `.claude/skills/*`, `.cursor/rules/*`, `.windsurf/rules/*`, `.clinerules/*`, `.roo/rules/*`, `.kiro/steering/*`, `.github/copilot-instructions.md`, `.github/instructions/*.md` |
 | | Claude Code auto memory, `~/.claude/projects/<project>/memory/*.md` (stored as `@claude-memory/...`; restored into the matching folder for the project's path on each machine, and shared by its worktrees) |
-| Global (`$HOME`) | `~/.claude/CLAUDE.md`, `~/.claude/napkin.md`, `~/.claude/{commands,agents,skills}/*`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.config/goose/.goosehints`, and the same for agents run inside Xcode under `~/Library/Developer/Xcode/CodingAssistant/` (`ClaudeAgentConfig/`, `codex/`, `gemini/`) |
+| Global (`$HOME`) | `~/.claude/CLAUDE.md`, `~/.claude/napkin.md`, `~/.claude/{commands,agents,skills}/*`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.config/goose/.goosehints`, and the same for agents run inside Xcode under `~/Library/Developer/Xcode/CodingAssistant/` (`ClaudeAgentConfig/`, `codex/`, `gemini/`, also `gemini/.gemini/GEMINI.md`) |
 
 Run `punk scan` to see what would be captured. To add your own patterns, put globs in `punk.json`
 inside the store (`{"include": ["docs/ai/*.md"], "exclude": []}`).
@@ -293,13 +293,15 @@ not `~/.claude`, `~/.codex` and `~/.gemini`.
 - **Memories:** project memories (`CLAUDE.md`, `AGENTS.md`, ...) are in the project folder, so
   `punk track <project>` covers them as for any editor. In those folders, `CLAUDE.md`, `napkin.md`,
   `commands/`, `agents/` and `skills/` of `ClaudeAgentConfig`, `codex/AGENTS.md` and
-  `gemini/GEMINI.md` (or `gemini/.gemini/GEMINI.md`) are part of the global satellite. Xcode's MCP
-  list and the agents' settings, credentials and sessions are not, and neither is the auto memory
-  Xcode's Claude Agent keeps for a project. As with every global file, restoring on another machine
+  `gemini/GEMINI.md` are part of the global satellite (also `gemini/.gemini/GEMINI.md`, in case
+  Gemini's home is set to that folder). Xcode's MCP
+  list and the agents' settings, credentials and sessions are not, and neither is any auto memory
+  Xcode's Claude Agent keeps for a project there. As with every global file, restoring on another machine
   writes them there too, also on Linux.
-- **MCP tools:** Xcode 27 keeps a list of MCP servers in
-  `~/Library/Developer/Xcode/CodingAssistant/mcp-servers.json`. Add punk there with the full path
-  from `which punk`, since an app started from the Dock does not get your shell's `PATH`:
+- **MCP tools:** Apple says to add MCP servers in each agent's configuration folder. Xcode 27 also
+  creates `~/Library/Developer/Xcode/CodingAssistant/mcp-servers.json` (empty at first); adding punk
+  there has not been tried yet. Either way, give the full path from `which punk`, since an app
+  started from the Dock does not get your shell's `PATH`:
 
   ```json
   { "mcpServers": { "punk-records": { "command": "/opt/homebrew/bin/punk", "args": ["mcp"] } } }
