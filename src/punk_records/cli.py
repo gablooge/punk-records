@@ -58,9 +58,10 @@ def cmd_track(store: Store, a) -> int:
         n = len(discover(root, store._kind(sid), store.config()))
         print(f"tracking {sid}  <-  {root}  ({n} memory file{'' if n == 1 else 's'})")
         if root == Path.home().resolve():
-            print("punk: warning: this is your home folder. Memories in ~/.claude, ~/.codex and ~/.gemini are "
-                  "already the global satellite, and every save would walk your whole home folder. Track "
-                  f"project folders instead (`punk untrack {sid}`, then `punk track ~/code/app`).", file=sys.stderr)
+            print("punk: warning: this is your home folder. Memories in ~/.claude, ~/.codex, ~/.gemini and "
+                  "Xcode's agent folders are already the global satellite, and every save would walk your "
+                  f"whole home folder. Track project folders instead (`punk untrack {sid}`, then "
+                  "`punk track ~/code/app`).", file=sys.stderr)
         elif count_files(root, HUGE_FOLDER) >= HUGE_FOLDER:
             print(f"punk: warning: {root} has more than {HUGE_FOLDER:,} files; every save, watch rescan and "
                   "session hook walks all of them. Tracking individual projects is faster.", file=sys.stderr)
@@ -441,7 +442,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("remote", nargs="?", help="git URL or path of an existing store to clone")
     sp.add_argument("--encrypted", metavar="URL", help="join an encrypted remote (see `punk encrypt`)")
     sp.add_argument("--machine", help="name for this machine (default: hostname)")
-    sp.add_argument("--no-global", action="store_true", help="don't track ~/.claude, ~/.codex, ...")
+    sp.add_argument("--no-global", action="store_true", help="don't track ~/.claude, ~/.codex, Xcode's agents, ...")
 
     sp = add("track", cmd_track, "start persisting a project's memories")
     sp.add_argument("paths", nargs="*", help="project directories (default: .)")

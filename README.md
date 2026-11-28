@@ -285,26 +285,33 @@ Clients that browse the [MCP Registry](https://registry.modelcontextprotocol.io)
 
 ### Xcode
 
-Xcode 26.3 and newer run Claude Agent, Codex and Gemini inside Xcode with their own configuration
-under `~/Library/Developer/Xcode/CodingAssistant/` instead of `~/.claude`, `~/.codex` and `~/.gemini`.
+Xcode runs Claude Agent, Codex and Gemini inside Xcode with their own configuration folders under
+`~/Library/Developer/Xcode/CodingAssistant/` (`ClaudeAgentConfig`, `codex`, `gemini`; Apple:
+[Extending and customizing agents](https://developer.apple.com/documentation/xcode/extending-and-customizing-agents)),
+not `~/.claude`, `~/.codex` and `~/.gemini`.
 
 - **Memories:** project memories (`CLAUDE.md`, `AGENTS.md`, ...) are in the project folder, so
-  `punk track <project>` covers them as for any editor. The global memories, commands, agents and
-  skills in `CodingAssistant/ClaudeAgentConfig/`, `codex/AGENTS.md` and `gemini/GEMINI.md` are part
-  of the global satellite. Xcode's MCP list and the agents' settings and credentials are not synced.
-- **MCP tools:** add punk to `~/Library/Developer/Xcode/CodingAssistant/mcp-servers.json`. Xcode
-  does not use your shell's `PATH`, so give the full path from `which punk`:
+  `punk track <project>` covers them as for any editor. In those folders, `CLAUDE.md`, `napkin.md`,
+  `commands/`, `agents/` and `skills/` of `ClaudeAgentConfig`, `codex/AGENTS.md` and
+  `gemini/GEMINI.md` (or `gemini/.gemini/GEMINI.md`) are part of the global satellite. Xcode's MCP
+  list and the agents' settings, credentials and sessions are not, and neither is the auto memory
+  Xcode's Claude Agent keeps for a project. As with every global file, restoring on another machine
+  writes them there too, also on Linux.
+- **MCP tools:** Xcode 27 keeps a list of MCP servers in
+  `~/Library/Developer/Xcode/CodingAssistant/mcp-servers.json`. Add punk there with the full path
+  from `which punk`, since an app started from the Dock does not get your shell's `PATH`:
 
   ```json
   { "mcpServers": { "punk-records": { "command": "/opt/homebrew/bin/punk", "args": ["mcp"] } } }
   ```
 
-- **Sync:** `punk install-hooks` writes `~/.claude/settings.json`, which agents run inside Xcode do
-  not read. Run `punk watch --sync-every 300` or the VS Code extension, or `punk sync` by hand.
-- **Or drive Xcode from the terminal:** connect Claude Code or Codex to Xcode with
-  `claude mcp add --transport stdio xcode -- xcrun mcpbridge` (Apple's
-  [external agents](https://developer.apple.com/documentation/xcode/giving-external-agents-access-to-xcode)
-  guide); the punk hooks and MCP setup above then work as usual.
+- **Sync:** `punk install-hooks` writes `~/.claude/settings.json`, outside the folder Xcode's Claude
+  Agent uses, so sync with `punk watch --sync-every 300`, the VS Code extension, or `punk sync`.
+- **Or drive Xcode from the terminal:** let Claude Code or Codex use Xcode through its MCP server
+  (`claude mcp add --transport stdio xcode -- xcrun mcpbridge`, or
+  `codex mcp add xcode -- xcrun mcpbridge`; Apple:
+  [Giving external agents access to Xcode](https://developer.apple.com/documentation/xcode/giving-external-agents-access-to-xcode)).
+  The punk hooks and MCP setup above then work as usual.
 
 ### Things to ask your agent
 

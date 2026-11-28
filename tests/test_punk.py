@@ -334,10 +334,12 @@ class TestSync(Base):
             "ClaudeAgentConfig/skills/swiftui/SKILL.md": "# SwiftUI\n",
             "codex/AGENTS.md": "- Run xcodebuild test\n",
             "gemini/GEMINI.md": "- Prefer async/await\n",
+            "gemini/.gemini/GEMINI.md": "- if Xcode points Gemini's home here\n",
         }
         never = {
             "mcp-servers.json": '{"mcpServers": {}}\n',
             "ClaudeAgentConfig/.claude": '{"projects": {}}\n',
+            "ClaudeAgentConfig/.claude.json": '{"mcpServers": {"x": {"env": {"TOKEN": "t"}}}}\n',
             "ClaudeAgentConfig/settings.json": "{}\n",
             "ClaudeAgentConfig/projects/x/session.jsonl": "{}\n",
             "ClaudeAgentConfig/projects/x/memory/MEMORY.md": "- a project's auto memory\n",

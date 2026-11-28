@@ -63,6 +63,7 @@ GLOBAL_GLOBS = [
     f"{XCODE_AGENTS}/ClaudeAgentConfig/skills/*",
     f"{XCODE_AGENTS}/codex/AGENTS.md",
     f"{XCODE_AGENTS}/gemini/GEMINI.md",
+    f"{XCODE_AGENTS}/gemini/.gemini/GEMINI.md",  # if Xcode points GEMINI_CLI_HOME at gemini/
 ]
 
 # Directories never descended into.
